@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Q.E.D. level verifier</title>
+<style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#111;color:#eee}pre{white-space:pre-wrap}.bad{color:#f77}.ok{color:#7e7}</style>
+</head>
+<body>
+<h1>Level verifier</h1>
+<p>Tries every ordering of the level's symbols (1 … slots long) and compares the game's verdict with an
+independent calculation. Open via the local server: <code>/tools/verify-levels.html</code>.</p>
+<pre id="out">running…</pre>
+<script type="module">
+import { LEVELS } from '../src/levels.js';
+import { S, canComplete, isComplete } from '../src/mathEngine.js';
+import * as K from '../src/constants.js';
+
+const OPS = new Set(['+', '−', '×', '÷']);
+const EPS = 1e-9;
+const toNum = (t) => Number(t.replace('−', '-'));
+
+// independent "math truth" (floating point, JS operator precedence, unary minus allowed)
+function truthArith(vals) {
+  let src = '';
+  for (const v of vals) src += OPS.has(v) ? ` ${{ '+': '+', '−': '-', '×': '*', '÷': '/' }[v]} ` : `(${toNum(v)})`;
+  if (/[-+*/]\s*$/.test(src) || /^\s*[*/+]/.test(src) || /[*/+-]\s+[*/+]/.test(src) || /\)\s*\(/.test(src)) return null;
+  if (/[*/+-]\s+-\s+-/.test(src) || /^\s*-\s+-/.test(src)) return null; // no double signs
+  try { const r = Function(`"use strict";return (${src});`)(); return Number.isFinite(r) ? r : null; } catch { return null; }
+}
+const truthByKind = {
+  power: ([a, b, c]) => a ** b - c,
+  derivative: ([a, n, x]) => a * n * x ** (n - 1),
+  integral: ([c, b, a]) => (a * (b * b - c * c)) / 2,
+  probability: ([a, b, c, d]) => (b && d ? (a / b) * (c / d) : null),
+  // independent floating-point versions of the formula rooms (src/mathEngine.js → EV)
+  'fraction-sum': ([a, b, c, d]) => (b && d ? a / b + c / d : null),
+  linear: ([a, b, c]) => (a ? (c - b) / a : null),
+  brackets: ([a, b, c]) => a * (b + c),
+  'square-of-sum': ([a, b]) => (a + b) ** 2,
+  'diff-squares': ([a, b]) => a ** 2 - b ** 2,
+  'poly-value': ([a, b, x]) => x * x + a * x + b,
+  'power-product': ([a, b, c, d]) => a ** b * c ** d,
+  logarithm: ([b, x]) => { if (b < 2 || x < 1) return null; const k = Math.round(Math.log(x) / Math.log(b)); return b ** k === x ? k : null; },
+  sequence: ([a1, d, n]) => a1 + (n - 1) * d,
+  'triangle-angle': ([a, b]) => 180 - a - b,
+  perimeter: ([a, b]) => 2 * (a + b),
+  'product-2': ([a, b]) => a * b,
+  pythagoras: ([a, b]) => { const c = Math.sqrt(a * a + b * b); return Number.isInteger(c) ? c : null; },
+  'triangle-area': ([a, b]) => (a * b) / 2,
+  'circle-area': ([a, b]) => (a + b) ** 2,
+  'product-3': ([a, b, c]) => a * b * c,
+  'polygon-angles': ([n, k]) => (n - 2) * k,
+  'limit-linear': ([x0, a, b]) => a * x0 + b,
+  'power-rule': ([a, n, x]) => a * n * x ** (n - 1),
+  'second-derivative': ([a, n, x]) => a * n * (n - 1) * x ** (n - 2),
+  'chain-rule': ([a, b, n]) => n * a * (a + b) ** (n - 1),
+  vertex: ([a, b]) => (a ? b / (2 * a) : null),
+  'integral-square': ([b, a]) => (a * b ** 3) / 3,
+  'integral-const': ([c, b, a]) => a * (b - c),
+  'sum-k': ([n, a]) => (a * n * (n + 1)) / 2,
+  'mean-3': ([a, b, c]) => (a + b + c) / 3,
+  'median-3': (v) => [...v].sort((p, q) => p - q)[1],
+  'range-3': (v) => Math.max(...v) - Math.min(...v),
+  combinations: ([n, k]) => (k < 0 || k > n ? null : fact(n) / (fact(k) * fact(n - k))),
+  permutations: ([a, b]) => fact(a) / fact(b),
+  binomial: ([n, k, m]) => (k < 0 || k > n ? null : fact(n) / (fact(k) * fact(n - k)) / 2 ** m),
+  conditional: ([a, b, c, d]) => (b && c && d ? a / b / (c / d) : null),
+  'variance-2': ([a, b]) => ((a - b) / 2) ** 2,
+  'sum-of-powers': ([a, b, c, d]) => a ** b + c ** d,
+};
+function fact(n) { if (!Number.isInteger(n) || n < 0 || n > 12) return NaN; let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; }
+
+function* sequences(pool, maxLen, prefix = [], used = new Set()) {
+  if (prefix.length) yield prefix;
+  if (prefix.length === maxLen) return;
+  const seen = new Set();
+  for (let i = 0; i < pool.length; i++) {
+    if (used.has(i) || seen.has(pool[i])) continue;
+    seen.add(pool[i]); used.add(i);
+    yield* sequences(pool, maxLen, [...prefix, pool[i]], used);
+    used.delete(i);
+  }
+}
+
+const lines = [];
+let problems = 0;
+for (const lvl of LEVELS) {
+  const pool = lvl.tokens.map((t) => t[0]);
+  const slots = lvl.template.filter((p) => p === S).length;
+  const target = lvl.target.n / lvl.target.d;
+  const arith = lvl.evaluate.kind === 'arith';
+  let solutions = 0, rejected = [], falseAccept = [], badPrefix = [];
+  for (const seq of sequences(pool, slots)) {
+    if (!arith && seq.length !== slots) continue;
+    let truth;
+    if (arith) truth = truthArith(seq);
+    else {
+      if (seq.some((v) => OPS.has(v))) truth = null;
+      else { const fn = truthByKind[lvl.evaluate.kind]; truth = fn ? fn(seq.map(toNum)) : null; }
+    }
+    const correct = truth !== null && Math.abs(truth - target) < EPS;
+    const accepted = isComplete(lvl, seq);
+    if (correct) {
+      solutions++;
+      if (!accepted) rejected.push(seq.join(' '));
+      // every prefix of a correct solution must stay "alive" while collecting
+      for (let k = 1; k <= seq.length; k++) {
+        const pre = seq.slice(0, k);
+        const rest = [...pool]; for (const v of pre) rest.splice(rest.indexOf(v), 1);
+        if (!canComplete(lvl, pre, rest)) { badPrefix.push(`${seq.join(' ')} (dead after "${pre.join(' ')}")`); break; }
+      }
+    } else if (accepted) falseAccept.push(seq.join(' '));
+  }
+  const bad = rejected.length + falseAccept.length + badPrefix.length;
+  problems += bad;
+  lines.push(`<span class="${bad ? 'bad' : 'ok'}">${lvl.name}: ${solutions} correct expressions, ${bad} problems</span>`);
+  if (rejected.length) lines.push(`  correct but REJECTED: ${rejected.slice(0, 30).join('  |  ')}`);
+  if (falseAccept.length) lines.push(`  wrong but ACCEPTED: ${falseAccept.slice(0, 30).join('  |  ')}`);
+  if (badPrefix.length) lines.push(`  marked as mistake too early: ${badPrefix.slice(0, 30).join('  |  ')}`);
+}
+// ---------------------------------------------------------------- reachability
+// Simulates jumps with the game's physics (normal gravity) from every reachable surface, follows ladders
+// and sponges, then checks that every symbol, pickup and the door can be reached by a standing player.
+const DT = 1 / 60, SW = 40, SH = 18;
+function simulate(lvl, x0, feet, dir, jump, holdFrames) {
+  let x = x0, y = feet - K.PLAYER_H, vy = jump ? -K.JUMP_V : 0;
+  for (let f = 0; f < 400; f++) {
+    const holding = f < holdFrames;
+    vy = Math.min(vy + K.GRAVITY * (vy < 0 && !holding ? 1.8 : 1) * DT, K.MAX_FALL);
+    x = Math.max(16, Math.min(K.W - 16 - K.PLAYER_W, x + dir * K.SPEED * DT));
+    const prev = y + K.PLAYER_H;
+    y += vy * DT;
+    if (vy < 0) continue;
+    const b = y + K.PLAYER_H, over = (px, pw) => x + K.PLAYER_W > px + 3 && x < px + pw - 3;
+    const sp = (lvl.sponges ?? []).find(([sx, sy]) => over(sx - SW / 2, SW) && prev <= sy - SH + 1 && sy - SH <= b);
+    if (sp) { y = sp[1] - SH - K.PLAYER_H; vy = -K.BOUNCE_V; continue; }
+    if (b >= K.FLOOR_Y) return 'floor';
+    const i = lvl.platforms.findIndex(([px, py, pw]) => over(px, pw) && prev <= py + 1 && py <= b);
+    if (i >= 0) return i;
+  }
+  return null;
+}
+function reachable(lvl) {
+  const seen = new Set(['floor']), queue = ['floor'];
+  const surf = (s) => (s === 'floor' ? [16, K.FLOOR_Y, K.W - 32] : lvl.platforms[s]);
+  while (queue.length) {
+    const s = queue.shift();
+    const [sx, sy, sw] = surf(s);
+    const add = (d) => { if (d !== null && !seen.has(d)) { seen.add(d); queue.push(d); } };
+    for (let x = sx - K.PLAYER_W + 6; x <= sx + sw - 6; x += 6)
+      for (const dir of [-1, 0, 1]) for (const [jump, hold] of [[true, 999], [true, 8], [false, 0]]) add(simulate(lvl, x, sy, dir, jump, hold));
+    for (const [lx, top, bottom] of lvl.ladders ?? []) { // ladders join the surfaces at both ends
+      const on = (yy) => Math.abs(yy - sy) < 2 && lx >= sx - 4 && lx <= sx + sw + 4;
+      if (on(bottom)) add(lvl.platforms.findIndex(([px, py, pw]) => py === top && lx >= px && lx <= px + pw));
+      if (on(top)) add(bottom === K.FLOOR_Y ? 'floor' : lvl.platforms.findIndex(([px, py, pw]) => py === bottom && lx >= px && lx <= px + pw));
+    }
+  }
+  return [...seen].map(surf);
+}
+const standReach = (surfaces, lvl, x, y, radius) => surfaces.some(([sx, sy, sw]) => {
+  const cy = sy - K.PLAYER_H / 2, cx = Math.max(sx + 3 - K.PLAYER_W / 2, Math.min(sx + sw - 3 + K.PLAYER_W / 2, x));
+  return Math.hypot(cx - x, cy - y) <= radius;
+}) || (lvl.ladders ?? []).some(([lx, top, bottom]) => Math.abs(lx - x) <= radius && y >= top - K.PLAYER_H / 2 - radius && y <= bottom - K.PLAYER_H / 2 + radius);
+
+lines.push('', 'Reachability (every symbol, pickup and the door):');
+for (const lvl of LEVELS) {
+  const surfaces = reachable(lvl);
+  const missing = [];
+  lvl.tokens.forEach(([t, x, y]) => { if (!standReach(surfaces, lvl, x, y, K.TOKEN_R + 22)) missing.push(`symbol ${t}`); });
+  (lvl.pickups ?? []).forEach(([k, x, y]) => { if (!standReach(surfaces, lvl, x, y, 34)) missing.push(`${k} pickup`); });
+  const unreachedPlatforms = lvl.platforms.filter((p) => !surfaces.includes(p)).length;
+  problems += missing.length;
+  lines.push(`<span class="${missing.length ? 'bad' : 'ok'}">${lvl.name}: ${missing.length ? 'UNREACHABLE ' + missing.join(', ') : 'all reachable'}${unreachedPlatforms ? ` (${unreachedPlatforms} decorative platform(s) unreachable)` : ''}</span>`);
+}
+
+lines.push('', problems ? `<span class="bad">${problems} problems</span>` : '<span class="ok">All levels OK</span>');
+document.getElementById('out').innerHTML = lines.join('\n');
+window.verifyResult = { problems, text: document.getElementById('out').innerText };
+</script>
+</body>
+</html>
