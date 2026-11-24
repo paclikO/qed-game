@@ -1,0 +1,21 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #0e1412;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#game {
+  /* keep 16:9 and fit the window */
+  width: min(100vw, calc(100vh * 16 / 9));
+  height: min(100vh, calc(100vw * 9 / 16));
+  display: block;
+  outline: none;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+}
