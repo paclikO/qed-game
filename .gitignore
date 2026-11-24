@@ -1,0 +1,27 @@
+# AI tools: shared config (CLAUDE.md, AGENTS.md, .claude/settings.json,
+# opencode.json, agent/command/skill dirs) is committed; local state is not.
+.claude/settings.local.json
+CLAUDE.local.md
+.opencode/node_modules/
+.opencode/package*.json
+.opencode/bun.lock*
+opencode.local.json
+AGENTS.local.md
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Logs / temp
+*.log
+tmp/
