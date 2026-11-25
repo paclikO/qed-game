@@ -395,6 +395,43 @@ class Game {
     this.emitDashLines(p, 4);
   }
 
+  /** Indices into SCHOOLS sorted strictly clockwise around the campus ring (for ← / → navigation). */
+  mapRingOrder() {
+    const painted = !!images['ui.map'];
+    const pts = SCHOOLS.map((s, i) => ({
+      i,
+      x: painted ? s.art.x + s.art.w / 2 : s.map.x,
+      y: painted ? s.art.y + s.art.h / 2 : s.map.y - 40,
+    }));
+    const mx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
+    const my = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+    return pts
+      .sort((a, b) => Math.atan2(a.y - my, a.x - mx) - Math.atan2(b.y - my, b.x - mx))
+      .map((p) => p.i);
+  }
+
+  moveMapSelection(dir) {
+    const ring = this.mapRingOrder();
+    const pos = ring.indexOf(this.mapSel);
+    this.mapSel = ring[(pos + (dir > 0 ? 1 : ring.length - 1)) % ring.length];
+  }
+
+  moveMapVertical(dy) {
+    const painted = !!images['ui.map'];
+    const posOf = (s) => (painted ? { x: s.art.x + s.art.w / 2, y: s.art.y + s.art.h / 2 } : { x: s.map.x, y: s.map.y - 40 });
+    const cur = posOf(SCHOOLS[this.mapSel]);
+    let best = -1, bestScore = Infinity;
+    SCHOOLS.forEach((s, i) => {
+      if (i === this.mapSel) return;
+      const p = posOf(s);
+      const vy = (p.y - cur.y) * dy;
+      if (vy <= 30) return;
+      const score = Math.abs(p.x - cur.x) * 2 + vy;
+      if (score < bestScore) { bestScore = score; best = i; }
+    });
+    if (best >= 0) this.mapSel = best;
+  }
+
   onKey(code) {
     const p = this.player;
     const left = code === 'ArrowLeft' || code === 'KeyA', right = code === 'ArrowRight' || code === 'KeyD';
@@ -402,7 +439,9 @@ class Game {
       if (left || right) this.charIndex = (this.charIndex + (right ? 1 : CHARACTERS.length - 1)) % CHARACTERS.length;
       else if (code === 'Enter') this.confirmCharacter();
     } else if (this.state === 'map') {
-      if (left || right) this.mapSel = (this.mapSel + (right ? 1 : SCHOOLS.length - 1)) % SCHOOLS.length;
+      if (left || right) this.moveMapSelection(right ? 1 : -1);
+      else if (code === 'ArrowUp' || code === 'KeyW') this.moveMapVertical(-1);
+      else if (code === 'ArrowDown' || code === 'KeyS') this.moveMapVertical(1);
       else if (code === 'Enter') this.goHallway(SCHOOLS[this.mapSel].id);
       else if (code === 'Escape') this.goCharSelect();
     } else if (this.state === 'hallway') {
