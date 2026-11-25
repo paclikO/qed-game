@@ -204,6 +204,7 @@ class Game {
     this.player = {
       x: this.level.spawn, y: FLOOR_Y - PLAYER_H, vx: 0, vy: 0, facing: 1, onGround: true,
       coyote: 0, jbuf: 0, drop: 0, walkT: 0, gdir: 1, flipT: 0, climbing: null,
+      squash: 0, stepIdx: 0,
     };
     this.tray = [];
     this.dead = false;
@@ -469,7 +470,7 @@ class Game {
     }
     const v = (this.held('ArrowDown', 'KeyS') ? 1 : 0) - (this.held('ArrowUp', 'KeyW') ? 1 : 0);
     p.vy = v * K.CLIMB_SPEED;
-    if (v) p.walkT += dt * 0.6;
+    if (v) p.walkT += dt * 1.1;
     p.y += p.vy * dt;
     const feet = p.y + PLAYER_H;
     if (feet <= top) { p.y = top - PLAYER_H; p.climbing = null; this.land(p.y); p.coyote = K.COYOTE_TIME; }
@@ -478,6 +479,8 @@ class Game {
 
   updatePlayer(dt) {
     const p = this.player;
+    p.squash *= Math.exp(-14 * dt);
+    if (Math.abs(p.squash) < 0.002) p.squash = 0;
     if (p.flipT > 0 && (p.flipT -= dt) <= 0) { p.gdir = 1; p.onGround = false; p.coyote = 0; }
     p.coyote -= dt; p.jbuf -= dt; p.drop -= dt;
     if (p.climbing) { this.updateClimb(dt); if (p.climbing || p.onGround) return; }
@@ -485,8 +488,22 @@ class Game {
     const g = p.gdir;
     const dir = (this.held('ArrowRight', 'KeyD') ? 1 : 0) - (this.held('ArrowLeft', 'KeyA') ? 1 : 0);
     p.vx = dir * K.SPEED;
-    if (dir) { p.facing = dir; p.walkT += dt; }
-    if (p.jbuf > 0 && p.coyote > 0) { p.vy = -K.JUMP_V * g; p.jbuf = 0; p.coyote = 0; }
+    if (dir) {
+      p.facing = dir;
+      p.walkT += dt;
+      if (p.onGround) {
+        const step = Math.floor(p.walkT * 4.75);
+        if (step !== p.stepIdx) {
+          p.stepIdx = step;
+          this.dust(p.x + PLAYER_W / 2 - dir * 5, g > 0 ? p.y + PLAYER_H : p.y, 2, 'rgba(244,239,230,0.65)');
+        }
+      }
+    }
+    if (p.jbuf > 0 && p.coyote > 0) {
+      p.vy = -K.JUMP_V * g; p.jbuf = 0; p.coyote = 0;
+      p.squash = -0.11;
+      this.dust(p.x + PLAYER_W / 2, g > 0 ? p.y + PLAYER_H : p.y, 4);
+    }
 
     // holding ↑ next to a ladder grabs it mid-air
     if (g > 0 && this.held('ArrowUp', 'KeyW') && !p.onGround) {
@@ -516,6 +533,7 @@ class Game {
         if (sponge) {
           p.y = sponge.y - SPONGE_H - PLAYER_H;
           p.vy = -K.BOUNCE_V;
+          p.squash = -0.15;
           sponge.squash = 1;
           this.dust(sponge.x, sponge.y - SPONGE_H, 10, '#f3d36b');
           return;
@@ -539,6 +557,7 @@ class Game {
     if (p.onGround) {
       p.coyote = K.COYOTE_TIME;
       if (!wasGround) {
+        p.squash = Math.min(0.16, 0.05 + impact / 4500);
         const fx = p.x + PLAYER_W / 2, fy = g > 0 ? p.y + PLAYER_H : p.y;
         if (impact > K.HARD_LANDING_V && g > 0) { this.puff(fx, fy + 4, Math.min(1.4, impact / 700)); this.shake = Math.max(this.shake, 0.08); }
         else this.dust(fx, fy, 6);
@@ -680,7 +699,8 @@ class Game {
     const fade = exiting ? Math.max(0, Math.min(1, 1 - (this.exitT - 1.15) / 0.5)) : 1;
     drawCharacter(g, this.character, p.x, p.y, {
       facing: p.facing, walkT: p.walkT, walking: p.vx !== 0 || (exiting && this.exitT > 0.9),
-      airborne: !p.onGround && !p.climbing && !exiting, gdir: p.gdir, climbing: !!p.climbing, alpha: fade, vy: p.vy,
+      airborne: !p.onGround && !p.climbing && !exiting, gdir: p.gdir, climbing: !!p.climbing,
+      alpha: fade, vy: p.vy, squash: p.squash, t: this.t,
     });
     if (this.hasKey && !exiting) {
       const h = this.handPos();

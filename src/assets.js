@@ -3,15 +3,16 @@
 // so the game is always playable. Prompts for generating the missing art: docs/art-prompts.md
 //
 // Conventions
-//   characters – full body, side view, facing LEFT, transparent background, feet touching the bottom edge
+//   characters – full body, side view, facing LEFT, transparent background, feet touching the bottom edge (portraits/fallback)
+//   char sheets – 4×2 grid, facing RIGHT, feet bottom-aligned: row 0 = 4 walk frames; row 1 = idle, jump up, jump fall, climb
 //   desk       – whole desk incl. legs, slight top-down view; the top ~12 % of its height is the table top (see drawPlatform)
 //   shelf      – wall shelf plank + brackets; top edge = shelf surface
 //   books      – a small stack of books, bottom edge = where it rests
 export const ASSET_FILES = {
   'char.professor': 'assets/characters/professor.png',
   'char.professorka': 'assets/characters/professorka.png',
-  'char.professor_jump': 'assets/characters/professor_jump.png',     // jump poses face RIGHT
-  'char.professorka_jump': 'assets/characters/professorka_jump.png',
+  'char.professor_sheet': 'assets/characters/professor_sheet.png',
+  'char.professorka_sheet': 'assets/characters/professorka_sheet.png',
   'prop.desk': 'assets/props/desk.png',
   'prop.shelf': 'assets/props/shelf.png',
   'prop.bookcase': 'assets/props/bookcase.png',
