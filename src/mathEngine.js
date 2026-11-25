@@ -44,6 +44,7 @@ const safe = (fn) => (vals) => { try { return fn(vals); } catch { return null; }
 /**
  * number op number op number … with × ÷ before + −.
  * A '−' where a number is expected is a sign (unary minus): "− 2 × 3", "4 × − 2".
+ * A negative number token directly after a number ("− 4 −2", "2 −2 × 4") acts as subtraction ("+ −2").
  */
 export const evalArith = safe((vals) => {
   const nums = [], ops = [];
@@ -55,10 +56,15 @@ export const evalArith = safe((vals) => {
     nums.push(num(vals[i]).mul(frac(sign))); // throws if it's an operator
     i += 1;
     if (i === vals.length) break;
-    if (!OPS.has(vals[i])) throw new Error('expected operator');
-    ops.push(vals[i]);
-    i += 1;
-    if (i === vals.length) return null; // trailing operator
+    if (OPS.has(vals[i])) {
+      ops.push(vals[i]);
+      i += 1;
+      if (i === vals.length) return null; // trailing operator
+    } else if (isNegative(vals[i])) {
+      ops.push('+'); // "a −2" reads as "a − 2" = a + (−2)
+    } else {
+      throw new Error('expected operator');
+    }
   }
   if (!nums.length) return null;
   const terms = [nums[0]], signs = [];
