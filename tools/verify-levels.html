@@ -17,10 +17,15 @@ const OPS = new Set(['+', '−', '×', '÷']);
 const EPS = 1e-9;
 const toNum = (t) => Number(t.replace('−', '-'));
 
-// independent "math truth" (floating point, JS operator precedence, unary minus allowed)
+// independent "math truth" (floating point, JS operator precedence, unary minus & "a −2" subtraction allowed)
 function truthArith(vals) {
   let src = '';
-  for (const v of vals) src += OPS.has(v) ? ` ${{ '+': '+', '−': '-', '×': '*', '÷': '/' }[v]} ` : `(${toNum(v)})`;
+  for (let i = 0; i < vals.length; i++) {
+    const v = vals[i];
+    if (OPS.has(v)) src += ` ${{ '+': '+', '−': '-', '×': '*', '÷': '/' }[v]} `;
+    else if (i > 0 && !OPS.has(vals[i - 1]) && v.startsWith('−')) src += ` + (${toNum(v)})`;
+    else src += `(${toNum(v)})`;
+  }
   if (/[-+*/]\s*$/.test(src) || /^\s*[*/+]/.test(src) || /[*/+-]\s+[*/+]/.test(src) || /\)\s*\(/.test(src)) return null;
   if (/[*/+-]\s+-\s+-/.test(src) || /^\s*-\s+-/.test(src)) return null; // no double signs
   try { const r = Function(`"use strict";return (${src});`)(); return Number.isFinite(r) ? r : null; } catch { return null; }
