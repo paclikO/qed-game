@@ -358,8 +358,8 @@ const MECHANICS = [
 ];
 // matches the real key bindings in main.js
 const CONTROLS = [
-  ['← →', 'Move'], ['↑ ↓', 'Climb ladders'], ['Space', 'Jump (↑ too)'], ['F', 'Pick up'],
-  ['E', 'Eraser'], ['R', 'Reset'], ['↓', 'Drop down'], ['Esc', 'Leave level'],
+  ['← →', 'Move'], ['↑ ↓', 'Climb ladders'], ['Space', 'Jump (↑ too)'], ['X', 'Dash (air too)'],
+  ['F', 'Pick up'], ['E', 'Eraser'], ['R', 'Reset'], ['↓', 'Drop down'], ['Esc', 'Leave level'],
 ];
 
 function keyCap(g, x, y, label) {
@@ -424,10 +424,10 @@ export function renderRules(game, g) {
   });
 
   // --- Controls (bottom row)
-  g.font = chalkFont(16, true); g.fillStyle = '#ffe7a6'; g.fillText('Controls', 590, 348);
+  g.font = chalkFont(16, true); g.fillStyle = '#ffe7a6'; g.fillText('Controls', 590, 344);
   CONTROLS.forEach(([k, label], i) => {
     const col = i % 2, row = Math.floor(i / 2);
-    const x = 590 + col * 168, y = 372 + row * 22;
+    const x = 590 + col * 168, y = 366 + row * 21;
     const w = keyCap(g, x, y, k);
     g.font = chalkFont(12); g.fillStyle = '#d9e6dd'; g.fillText(label, x + w + 6, y);
   });
