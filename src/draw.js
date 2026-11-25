@@ -336,11 +336,76 @@ export function drawToken(g, text, x, y, alpha, { highlight = false, negative = 
  * (x, y) = top-left of the hitbox; facing = ±1; gdir = ±1 (−1 draws him upside down).
  */
 export function drawCharacter(g, who, x, y, opts = {}) {
+  const sheet = images[`char.${who}_sheet`];
   const img = images[`char.${who}`];
   const jump = images[`char.${who}_jump`];
-  if (jump && opts.airborne && !opts.climbing) drawJumpSprite(g, jump, x, y, opts);
+  const usePortrait = opts.portrait || ((opts.scale ?? 1) > 1.2 && !opts.walking && !opts.airborne && !opts.climbing);
+  if (usePortrait && img) drawSprite(g, img, x, y, opts);
+  else if (sheet) drawSheetSprite(g, sheet, x, y, opts);
+  else if (jump && opts.airborne && !opts.climbing) drawJumpSprite(g, jump, x, y, opts);
   else if (img) drawSprite(g, img, x, y, opts);
   else drawProfessor(g, x, y, { ...opts, female: who === 'professorka' });
+}
+
+/**
+ * Animated 4×2 character sprite sheet (all poses face RIGHT, feet aligned to cell bottom):
+ *   Row 0: walk cycle (0: stride A, 1: passing A, 2: stride B, 3: passing B)
+ *   Row 1: 0: idle, 1: jump rising, 2: jump falling, 3: ladder climb
+ */
+function drawSheetSprite(g, sheet, x, y, {
+  facing = 1, walkT = 0, walking = false, airborne = false, gdir = 1,
+  scale = 1, alpha = 1, climbing = false, vy = 0, squash = 0, t = 0,
+} = {}) {
+  const COLS = 4, ROWS = 2;
+  const cw = sheet.width / COLS, ch = sheet.height / ROWS;
+  let col = 0, row = 1; // default: idle
+  let flipX = facing;
+  let bob = 0, tilt = 0;
+
+  if (climbing) {
+    col = 3; row = 1;
+    // Alternate hand/foot climb side as the professor climbs rungs
+    flipX = Math.floor(walkT * 7) % 2 === 0 ? 1 : -1;
+    bob = Math.sin(walkT * 14) * 1.2 * scale;
+  } else if (airborne) {
+    const relVy = vy * gdir; // negative = rising, positive = falling
+    col = relVy < 45 ? 1 : 2;
+    row = 1;
+    tilt = Math.max(-0.1, Math.min(0.1, relVy / 4500));
+  } else if (walking) {
+    col = Math.floor(walkT * 9.5) % 4;
+    row = 0;
+    bob = -Math.abs(Math.sin(walkT * Math.PI * 4.75)) * 1.6 * scale;
+    tilt = 0.03; // subtle energetic forward lean while moving
+  } else {
+    col = 0; row = 1; // idle
+  }
+
+  const h = SPRITE_H * 1.04 * scale;
+  const w = (h * cw) / ch;
+  g.save();
+  g.globalAlpha = alpha;
+  const cx = x + PLAYER_W / 2;
+  if (gdir > 0) g.translate(cx, y + PLAYER_H); else { g.translate(cx, y); g.scale(1, -1); }
+
+  // Soft contact shadow beneath feet when grounded
+  if (!airborne && !climbing) {
+    const sw = (walking ? 0.34 : 0.31) * w;
+    g.fillStyle = 'rgba(0,0,0,0.32)';
+    g.beginPath(); g.ellipse(0, 0, sw, 2.8 * scale, 0, 0, Math.PI * 2); g.fill();
+  }
+
+  // Squash & stretch (positive squash = landing compress, negative = takeoff stretch) + idle breathing
+  const breath = !walking && !airborne && !climbing ? Math.sin(t * 2.4) * 0.012 : 0;
+  const sx = 1 + squash - breath * 0.5;
+  const sy = 1 - squash + breath;
+
+  g.translate(0, bob);
+  g.scale(flipX * sx, sy);
+  g.rotate(tilt);
+  // Slight 1.5px downward offset accounts for the 2px bottom padding inside each packed sheet cell
+  g.drawImage(sheet, col * cw, row * ch, cw, ch, -w / 2, -h + 1.5 * scale, w, h);
+  g.restore();
 }
 
 /** Mid-air pose (art faces RIGHT), slightly smaller than standing, tilted with the jump arc. */

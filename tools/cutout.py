@@ -1,10 +1,12 @@
-"""Cut a character/prop out of an image with a plain paper background -> transparent PNG.
+"""Cut a character/prop out of an image with a plain paper or chroma-green background -> transparent PNG.
 
 usage:
   python tools/cutout.py in.jpg out.png [--height 640] [--thresh 38] [--holes]
+  python tools/cutout.py sheet.png out.png --chroma [--height 640]
 
---holes  also removes enclosed patches of background (e.g. the triangle between a shelf
-         bracket and the plank). Don't use it for characters: light skin can look like paper.
+--holes   also removes enclosed patches of background (e.g. between shelf brackets).
+--chroma  chroma-key bright green (#00FF00) background with green despill (best for characters).
+--soft    soft keying for white backgrounds: keeps glows/dust semi-transparent.
 Needs: pip install pillow numpy
 """
 import argparse
@@ -19,15 +21,43 @@ ap.add_argument("dst")
 ap.add_argument("--height", type=int, default=640)
 ap.add_argument("--thresh", type=float, default=38)
 ap.add_argument("--holes", action="store_true")
+ap.add_argument("--chroma", action="store_true",
+                help="chroma-key bright green (#00FF00) background with despill")
 ap.add_argument("--soft", action="store_true",
                 help="soft keying for white backgrounds: keeps glows/dust semi-transparent")
 ap.add_argument("--lo", type=float, default=20, help="--soft: colour distance that is fully transparent")
 ap.add_argument("--hi", type=float, default=75, help="--soft: colour distance that is fully opaque")
 args = ap.parse_args()
 
+
+def decontaminate_edges(rgb: np.ndarray, alpha: np.ndarray, passes: int = 5) -> np.ndarray:
+    """Bleed clean interior foreground colors outward into semi-transparent edges to prevent light halos."""
+    h, w, _ = rgb.shape
+    out = rgb.copy().astype(np.float32)
+    # Mark interior opaque pixels that aren't bright edge halos
+    solid = alpha >= 235
+    for _ in range(passes):
+        padded_s = np.pad(solid, 1, mode="constant", constant_values=False)
+        padded_c = np.pad(out, ((1, 1), (1, 1), (0, 0)), mode="edge")
+        cnt = np.zeros((h, w), dtype=np.float32)
+        acc = np.zeros((h, w, 3), dtype=np.float32)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy == 0 and dx == 0:
+                    continue
+                s = padded_s[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
+                c = padded_c[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
+                cnt += s
+                acc += c * s[..., None]
+        fill = (~solid) & (cnt > 0)
+        out[fill] = acc[fill] / cnt[fill, None]
+        solid = solid | fill
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 src = Image.open(args.src)
-if src.mode in ("RGBA", "LA", "P") and src.convert("RGBA").getextrema()[3][0] < 10:
-    # already has real transparency -> just resize (premultiplied) and crop
+if not args.chroma and src.mode in ("RGBA", "LA", "P") and src.convert("RGBA").getextrema()[3][0] < 10:
+    # already has real transparency -> resize (premultiplied), decontaminate edges, and crop
     rgba = np.asarray(src.convert("RGBA")).astype(np.float32)
     al = rgba[..., 3:] / 255
     pm = Image.fromarray(np.dstack([rgba[..., :3] * al, rgba[..., 3:]]).astype(np.uint8), "RGBA")
@@ -35,8 +65,10 @@ if src.mode in ("RGBA", "LA", "P") and src.convert("RGBA").getextrema()[3][0] < 
     pm = np.asarray(pm.resize(size, Image.LANCZOS)).astype(np.float32)
     al = pm[..., 3:] / 255
     rgb = np.where(al > 0, pm[..., :3] / np.maximum(al, 1e-3), 0)
-    out = Image.fromarray(np.dstack([np.clip(rgb, 0, 255), pm[..., 3:]]).astype(np.uint8), "RGBA")
-    out = out.crop(Image.fromarray(((pm[..., 3] > 24) * 255).astype(np.uint8)).getbbox())
+    alpha_u8 = pm[..., 3].astype(np.uint8)
+    rgb_clean = decontaminate_edges(np.clip(rgb, 0, 255).astype(np.uint8), alpha_u8)
+    out = Image.fromarray(np.dstack([rgb_clean, alpha_u8]), "RGBA")
+    out = out.crop(Image.fromarray(((alpha_u8 > 24) * 255).astype(np.uint8)).getbbox())
     out.save(args.dst)
     print("saved (source alpha)", args.dst, out.size)
     raise SystemExit
@@ -45,6 +77,26 @@ img = src.convert("RGB")
 img = img.resize((round(img.width * args.height / img.height), args.height), Image.LANCZOS)
 a = np.asarray(img).astype(np.int16)
 h, w, _ = a.shape
+
+if args.chroma:
+    f = a.astype(np.float32)
+    r, g, b = f[..., 0], f[..., 1], f[..., 2]
+    max_rb = np.maximum(r, b)
+    excess = g - max_rb
+    alpha = np.where(excess <= 12, 1.0, 1.0 - np.clip((excess - 35.0) / 60.0, 0.0, 1.0))
+    alpha[alpha < 0.06] = 0.0
+    # Despill green bounce light
+    g_clean = np.where(g > max_rb + 6, max_rb + np.minimum(6.0, (g - max_rb) * 0.15), g)
+    rgb = np.stack([r, g_clean, b], axis=-1).clip(0, 255).astype(np.uint8)
+    alpha_u8 = (alpha * 255).astype(np.uint8)
+    rgb = decontaminate_edges(rgb, alpha_u8, passes=6)
+    out = Image.fromarray(np.dstack([rgb, alpha_u8]), "RGBA")
+    bbox = Image.fromarray(((alpha_u8 > 16) * 255).astype(np.uint8)).getbbox()
+    if bbox:
+        out = out.crop(bbox)
+    out.save(args.dst)
+    print("saved (chroma)", args.dst, out.size)
+    raise SystemExit
 
 if args.soft:
     edge = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]])
@@ -109,11 +161,12 @@ for px in comps:
         ys, xs = zip(*px)
         fg[ys, xs] = True
 
-alpha = (Image.fromarray((fg * 255).astype(np.uint8))
-         .filter(ImageFilter.MinFilter(3))        # eat the 1px paper halo
-         .filter(ImageFilter.GaussianBlur(0.7)))
-out = img.copy()
-out.putalpha(alpha)
+alpha_img = (Image.fromarray((fg * 255).astype(np.uint8))
+             .filter(ImageFilter.MinFilter(3))        # eat the 1px paper halo
+             .filter(ImageFilter.GaussianBlur(0.7)))
+alpha_u8 = np.asarray(alpha_img)
+rgb_clean = decontaminate_edges(np.asarray(img), alpha_u8, passes=5)
+out = Image.fromarray(np.dstack([rgb_clean, alpha_u8]), "RGBA")
 out = out.crop(out.getbbox())
 out.save(args.dst)
 print("saved", args.dst, out.size)
