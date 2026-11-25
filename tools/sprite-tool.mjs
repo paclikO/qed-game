@@ -306,8 +306,8 @@ export function resizeRgba(src, newW, newH) {
   return { w: newW, h: newH, data: dst };
 }
 
-/** Chroma-key green (#00FF00) removal + green despill + interior color bleed decontamination. */
-export function chromaKeyGreen(src, { lo = 35, hi = 95, dropSpecks = true } = {}) {
+/** Chroma-key green (#00FF00) removal + green despill + crisp ink-preserving edge decontamination. */
+export function chromaKeyGreen(src, { lo = 16, hi = 52, alphaCutLo = 0.44, alphaCutHi = 0.86, dropSpecks = true } = {}) {
   const { w, h, data } = src;
   const out = new Uint8Array(data);
 
@@ -323,54 +323,107 @@ export function chromaKeyGreen(src, { lo = 35, hi = 95, dropSpecks = true } = {}
   }
   const keyR = bc ? br / bc : 0, keyG = bc ? bg / bc : 255, keyB = bc ? bb / bc : 0;
 
-  // Compute "greenness" score: how much green dominates over max(R, B) and how close to key color
+  // 1. Compute tight alpha matte with smooth S-curve (prevents 2-3px fuzzy outer skirts)
   const alpha = new Float32Array(w * h);
   for (let k = 0; k < w * h; k++) {
     const i = k * 4;
     const r = data[i], g = data[i + 1], b = data[i + 2];
-    const greenExcess = g - Math.max(r, b); // > 0 means green-dominant
+    const greenExcess = g - Math.max(r, b);
     const dist = Math.hypot(r - keyR, g - keyG, b - keyB);
-    // Pure chroma green has huge greenExcess (>80) and small dist
-    // Despill zone has moderate greenExcess (15..80)
-    if (greenExcess <= 12) {
-      alpha[k] = 1;
-    } else {
-      // Smooth matte based on greenExcess and distance from chroma key
+    let a = 1;
+    if (greenExcess > 8) {
       const t1 = Math.max(0, Math.min(1, (greenExcess - lo) / (hi - lo)));
-      const t2 = Math.max(0, Math.min(1, 1 - (dist - 40) / 140));
-      const bgProb = Math.max(t1, t2 * (greenExcess > 24 ? 1 : 0));
-      alpha[k] = 1 - bgProb;
+      const t2 = Math.max(0, Math.min(1, 1 - (dist - 35) / 130));
+      a = 1 - Math.max(t1, t2 * (greenExcess > 18 ? 1 : 0));
     }
+    if (a <= alphaCutLo) a = 0;
+    else if (a >= alphaCutHi) a = 1;
+    else {
+      const t = (a - alphaCutLo) / (alphaCutHi - alphaCutLo);
+      a = t * t * (3 - 2 * t);
+    }
+    alpha[k] = a;
   }
 
-  // Remove background ONLY if connected to border OR enclosed large pure-green hole
-  // (Since our characters have zero neon green inside them, any strongly green region > 15px is a background hole between legs/arms!)
-  const isBg = new Uint8Array(w * h);
-  for (let k = 0; k < w * h; k++) {
-    if (alpha[k] < 0.98) isBg[k] = 1;
-  }
-
-  // Apply alpha + green despill everywhere
+  // 2. Apply alpha + full green despill
   for (let k = 0; k < w * h; k++) {
     const i = k * 4;
     let r = data[i], g = data[i + 1], b = data[i + 2];
-    const a = alpha[k] < 0.06 ? 0 : alpha[k];
-    // Despill: cap green channel so no green bounce-light survives on hair/chalk/skin/outline
     const maxRB = Math.max(r, b);
-    if (g > maxRB + 6) {
-      const spill = g - maxRB;
-      g = Math.round(maxRB + Math.min(6, spill * 0.15));
+    if (g > maxRB) {
+      const avgRB = (r + b) * 0.5;
+      g = Math.round(Math.min(maxRB, avgRB + (maxRB - avgRB) * 0.85));
     }
-    out[i] = r; out[i + 1] = g; out[i + 2] = b; out[i + 3] = Math.round(a * 255);
+    out[i] = r; out[i + 1] = g; out[i + 2] = b; out[i + 3] = Math.round(alpha[k] * 255);
   }
 
-  return decontaminateEdges({ w, h, data: out }, {
-    solidAlpha: 235,
-    trimBrightEdge: false,
-    erodePasses: 0,
-    dropSpecks,
-    minComponentPx: 50,
-  });
+  // 3. Drop tiny isolated specks
+  if (dropSpecks) {
+    const seen = new Uint8Array(w * h);
+    for (let sy = 0; sy < h; sy++) {
+      for (let sx = 0; sx < w; sx++) {
+        const si = sy * w + sx;
+        if (seen[si] || out[si * 4 + 3] < 24) continue;
+        const q = [si]; seen[si] = 1;
+        for (let qi = 0; qi < q.length; qi++) {
+          const cur = q[qi], cx = cur % w, cy = (cur / w) | 0;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = cx + dx, ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const ni = ny * w + nx;
+            if (!seen[ni] && out[ni * 4 + 3] >= 24) { seen[ni] = 1; q.push(ni); }
+          }
+        }
+        if (q.length < 45) for (const idx of q) out[idx * 4 + 3] = 0;
+      }
+    }
+  }
+
+  // 4. Decontaminate semi-transparent edge RGB preferring dark ink neighbors when present
+  const solid = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const k = y * w + x;
+      if (out[k * 4 + 3] < 248) continue;
+      if (data[k * 4 + 1] - Math.max(data[k * 4], data[k * 4 + 2]) > 8) continue;
+      solid[k] = 1;
+    }
+  }
+  let curSolid = new Uint8Array(solid);
+  for (let pass = 0; pass < 4; pass++) {
+    const nextSolid = new Uint8Array(curSolid);
+    const nextData = new Uint8Array(out);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const k = y * w + x;
+        if (curSolid[k]) continue;
+        let sr = 0, sg = 0, sb = 0, cnt = 0, dr = 0, dg = 0, db = 0, dcnt = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const nk = ny * w + nx;
+            if (curSolid[nk]) {
+              const r = out[nk * 4], g = out[nk * 4 + 1], b = out[nk * 4 + 2];
+              sr += r; sg += g; sb += b; cnt++;
+              if (0.299 * r + 0.587 * g + 0.114 * b < 95) { dr += r; dg += g; db += b; dcnt++; }
+            }
+          }
+        }
+        if (dcnt > 0) {
+          nextData[k * 4] = Math.round(dr / dcnt); nextData[k * 4 + 1] = Math.round(dg / dcnt);
+          nextData[k * 4 + 2] = Math.round(db / dcnt); nextSolid[k] = 1;
+        } else if (cnt > 0) {
+          nextData[k * 4] = Math.round(sr / cnt); nextData[k * 4 + 1] = Math.round(sg / cnt);
+          nextData[k * 4 + 2] = Math.round(sb / cnt); nextSolid[k] = 1;
+        }
+      }
+    }
+    out.set(nextData);
+    curSolid = nextSolid;
+  }
+
+  return { w, h, data: out };
 }
 
 /** Crop tight bounding box of non-transparent pixels. */

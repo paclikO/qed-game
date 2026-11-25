@@ -44,6 +44,7 @@ no build step, no server – it is published with GitHub Pages straight from the
 |---|---|
 | ← → | move |
 | Space (or ↑) | jump – hold for a higher jump |
+| X | dash – quick horizontal burst (works mid-air too, once per jump) |
 | ↑ ↓ at a ladder | climb |
 | ↓ | drop down through a shelf |
 | F | pick up the symbol you are standing next to |

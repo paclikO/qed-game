@@ -4,7 +4,7 @@
 //
 // Conventions
 //   characters – full body, side view, facing LEFT, transparent background, feet touching the bottom edge (portraits/fallback)
-//   char sheets – 4×2 grid, facing RIGHT, feet bottom-aligned: row 0 = 4 walk frames; row 1 = idle, jump up, jump fall, climb
+//   char sheets – 5×2 grid, facing RIGHT, feet bottom-aligned: row 0 = 4 walk frames + dash launch; row 1 = idle, jump up, jump fall, climb, dash glide
 //   desk       – whole desk incl. legs, slight top-down view; the top ~12 % of its height is the table top (see drawPlatform)
 //   shelf      – wall shelf plank + brackets; top edge = shelf surface
 //   books      – a small stack of books, bottom edge = where it rests

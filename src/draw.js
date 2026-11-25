@@ -331,6 +331,36 @@ export function drawToken(g, text, x, y, alpha, { highlight = false, negative = 
   g.restore();
 }
 
+/** Crisp tapered chalk speed-line drawn behind a dashing character (progress 0..1). */
+export function drawDashLine(g, x, y, len, dir, progress, color = C.chalk) {
+  const a = Math.max(0, 1 - progress);
+  g.save();
+  g.globalAlpha = a * 0.72;
+  g.strokeStyle = color;
+  g.lineWidth = Math.max(1, (1 - progress * 0.6) * 2.4);
+  g.lineCap = 'round';
+  const shift = dir * progress * 24;
+  g.beginPath();
+  g.moveTo(x + shift, y);
+  g.lineTo(x + shift + dir * len * (1 - progress * 0.35), y);
+  g.stroke();
+  g.restore();
+}
+
+/** Fading ghost silhouette behind the character while dashing. */
+export function drawDashAfterimage(g, who, ghost) {
+  const k = ghost.t / ghost.dur;
+  const alpha = Math.max(0, (1 - k) * 0.42);
+  if (alpha <= 0.01) return;
+  g.save();
+  g.filter = 'brightness(1.22) sepia(0.28)';
+  drawCharacter(g, who, ghost.x, ghost.y, {
+    facing: ghost.facing, gdir: ghost.gdir, dashing: true, dashK: ghost.dashK,
+    airborne: false, walking: false, alpha, noShadow: true,
+  });
+  g.restore();
+}
+
 /**
  * Elderly professor in side profile, ~15° forward lean.
  * (x, y) = top-left of the hitbox; facing = ±1; gdir = ±1 (−1 draws him upside down).
@@ -339,7 +369,7 @@ export function drawCharacter(g, who, x, y, opts = {}) {
   const sheet = images[`char.${who}_sheet`];
   const img = images[`char.${who}`];
   const jump = images[`char.${who}_jump`];
-  const usePortrait = opts.portrait || ((opts.scale ?? 1) > 1.2 && !opts.walking && !opts.airborne && !opts.climbing);
+  const usePortrait = opts.portrait || ((opts.scale ?? 1) > 1.2 && !opts.walking && !opts.airborne && !opts.climbing && !opts.dashing);
   if (usePortrait && img) drawSprite(g, img, x, y, opts);
   else if (sheet) drawSheetSprite(g, sheet, x, y, opts);
   else if (jump && opts.airborne && !opts.climbing) drawJumpSprite(g, jump, x, y, opts);
@@ -348,21 +378,31 @@ export function drawCharacter(g, who, x, y, opts = {}) {
 }
 
 /**
- * Animated 4×2 character sprite sheet (all poses face RIGHT, feet aligned to cell bottom):
- *   Row 0: walk cycle (0: stride A, 1: passing A, 2: stride B, 3: passing B)
- *   Row 1: 0: idle, 1: jump rising, 2: jump falling, 3: ladder climb
+ * Animated 5×2 (or legacy 4×2) character sprite sheet (all poses face RIGHT, feet aligned to cell bottom):
+ *   Row 0: walk cycle (0: stride A, 1: passing A, 2: stride B, 3: passing B), 4: dash launch
+ *   Row 1: 0: idle, 1: jump rising, 2: jump falling, 3: ladder climb, 4: dash glide
  */
 function drawSheetSprite(g, sheet, x, y, {
   facing = 1, walkT = 0, walking = false, airborne = false, gdir = 1,
   scale = 1, alpha = 1, climbing = false, vy = 0, squash = 0, t = 0,
+  dashing = false, dashK = 0, noShadow = false,
 } = {}) {
-  const COLS = 4, ROWS = 2;
+  const ROWS = 2;
+  const COLS = Math.max(4, Math.round((sheet.width / sheet.height) * (280 / 220) * ROWS));
   const cw = sheet.width / COLS, ch = sheet.height / ROWS;
   let col = 0, row = 1; // default: idle
   let flipX = facing;
   let bob = 0, tilt = 0;
 
-  if (climbing) {
+  if (dashing) {
+    if (COLS >= 5) {
+      col = 4;
+      row = dashK < 0.32 ? 0 : 1; // Col 4 Row 0 = dash launch, Row 1 = dash glide
+    } else {
+      col = 1; row = 1;
+    }
+    tilt = 0.05;
+  } else if (climbing) {
     col = 3; row = 1;
     // Alternate hand/foot climb side as the professor climbs rungs
     flipX = Math.floor(walkT * 7) % 2 === 0 ? 1 : -1;
@@ -389,16 +429,17 @@ function drawSheetSprite(g, sheet, x, y, {
   if (gdir > 0) g.translate(cx, y + PLAYER_H); else { g.translate(cx, y); g.scale(1, -1); }
 
   // Soft contact shadow beneath feet when grounded
-  if (!airborne && !climbing) {
+  if (!noShadow && !airborne && !climbing && !dashing) {
     const sw = (walking ? 0.34 : 0.31) * w;
     g.fillStyle = 'rgba(0,0,0,0.32)';
     g.beginPath(); g.ellipse(0, 0, sw, 2.8 * scale, 0, 0, Math.PI * 2); g.fill();
   }
 
   // Squash & stretch (positive squash = landing compress, negative = takeoff stretch) + idle breathing
-  const breath = !walking && !airborne && !climbing ? Math.sin(t * 2.4) * 0.012 : 0;
-  const sx = 1 + squash - breath * 0.5;
-  const sy = 1 - squash + breath;
+  const breath = !walking && !airborne && !climbing && !dashing ? Math.sin(t * 2.4) * 0.012 : 0;
+  const dashStretch = dashing ? 0.07 : 0;
+  const sx = 1 + squash + dashStretch - breath * 0.5;
+  const sy = 1 - squash - dashStretch * 0.6 + breath;
 
   g.translate(0, bob);
   g.scale(flipX * sx, sy);

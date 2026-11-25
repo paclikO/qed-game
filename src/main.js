@@ -4,7 +4,7 @@ import { LEVELS } from './levels.js';
 import { S, canComplete, isComplete, isNegative } from './mathEngine.js';
 import {
   makeBackground, drawPlatform, drawFloor, drawToken, drawCharacter, drawBookStack, drawDoor, chalkFont, mathFont, rng,
-  drawLadder, drawSponge, drawPickup, drawDustPuff, drawKey, drawSparkle, drawEraserIcon,
+  drawLadder, drawSponge, drawPickup, drawDustPuff, drawKey, drawSparkle, drawEraserIcon, drawDashLine, drawDashAfterimage,
 } from './draw.js';
 import { loadAssets, images } from './assets.js';
 import { SCHOOLS, schoolOfLevel } from './schools.js';
@@ -204,7 +204,7 @@ class Game {
     this.player = {
       x: this.level.spawn, y: FLOOR_Y - PLAYER_H, vx: 0, vy: 0, facing: 1, onGround: true,
       coyote: 0, jbuf: 0, drop: 0, walkT: 0, gdir: 1, flipT: 0, climbing: null,
-      squash: 0, stepIdx: 0,
+      squash: 0, stepIdx: 0, dashT: 0, dashCd: 0, dashDir: 1, airDash: true, dashTrail: [], dashTrailCd: 0,
     };
     this.tray = [];
     this.dead = false;
@@ -352,8 +352,47 @@ class Game {
   startClimb(ladder) {
     const p = this.player;
     p.climbing = ladder;
+    p.dashT = 0;
+    p.airDash = true;
     p.x = ladder[0] - PLAYER_W / 2;
     p.vx = 0; p.vy = 0; p.onGround = false;
+  }
+
+  emitDashLines(p, count = 3) {
+    const cx = p.x + PLAYER_W / 2 - p.dashDir * 12;
+    for (let i = 0; i < count; i++) {
+      const y = p.y + 8 + Math.random() * (PLAYER_H - 12);
+      const len = 18 + Math.random() * 26;
+      const col = Math.random() < 0.35 ? C.gold : C.chalk;
+      this.effects.push({ kind: 'dashline', x: cx, y, len, dir: -p.dashDir, color: col, t: 0, dur: 0.18 + Math.random() * 0.12 });
+    }
+  }
+
+  tryDash() {
+    const p = this.player;
+    if (p.dashT > 0 || p.dashCd > 0) return;
+    if (!p.onGround && !p.climbing && !p.airDash) return;
+    const dir = (this.held('ArrowRight', 'KeyD') ? 1 : 0) - (this.held('ArrowLeft', 'KeyA') ? 1 : 0);
+    p.dashDir = dir || p.facing;
+    p.facing = p.dashDir;
+    if (!p.onGround && !p.climbing) p.airDash = false;
+    p.climbing = null;
+    p.dashT = K.DASH_TIME;
+    p.dashCd = K.DASH_COOLDOWN;
+    p.vy = 0;
+    p.squash = 0.14;
+    p.dashTrailCd = 0;
+    const fx = p.x + PLAYER_W / 2 - p.dashDir * 12;
+    const fy = p.gdir > 0 ? p.y + PLAYER_H - 10 : p.y + 10;
+    this.puff(fx, fy + (p.gdir > 0 ? 10 : 0), 0.72);
+    for (let i = 0; i < 8; i++) {
+      this.particles.push({
+        x: fx, y: p.y + 10 + Math.random() * (PLAYER_H - 14),
+        vx: -p.dashDir * (70 + Math.random() * 140), vy: (Math.random() - 0.5) * 45,
+        life: 0.25 + Math.random() * 0.25, color: Math.random() < 0.35 ? C.gold : C.chalk,
+      });
+    }
+    this.emitDashLines(p, 4);
   }
 
   onKey(code) {
@@ -396,6 +435,8 @@ class Game {
         const ladder = p.gdir > 0 && !p.climbing && p.onGround && this.ladderAt(feet, 4);
         if (ladder && feet < ladder[2] - 4) this.startClimb(ladder);
         else if (p.onGround) p.drop = 0.22;
+      } else if (code === 'KeyX') {
+        this.tryDash();
       } else if (code === 'KeyF') this.tryPick();
       else if (code === 'KeyE' || code === 'Backspace') this.useEraser();
       else if (code === 'KeyR') { this.resetBoard(); this.say('Reset – but the clock keeps ticking!', C.gold); }
@@ -481,11 +522,53 @@ class Game {
     const p = this.player;
     p.squash *= Math.exp(-14 * dt);
     if (Math.abs(p.squash) < 0.002) p.squash = 0;
+    p.dashCd = Math.max(0, p.dashCd - dt);
+    for (const tr of p.dashTrail) tr.t += dt;
+    p.dashTrail = p.dashTrail.filter((tr) => tr.t < tr.dur);
     if (p.flipT > 0 && (p.flipT -= dt) <= 0) { p.gdir = 1; p.onGround = false; p.coyote = 0; }
     p.coyote -= dt; p.jbuf -= dt; p.drop -= dt;
     if (p.climbing) { this.updateClimb(dt); if (p.climbing || p.onGround) return; }
 
     const g = p.gdir;
+    if (p.dashT > 0) {
+      // Horizontal dash burst (works on ground and mid-air; gravity pauses briefly)
+      p.dashT = Math.max(0, p.dashT - dt);
+      p.dashTrailCd -= dt;
+      if (p.dashTrailCd <= 0) {
+        p.dashTrailCd = 0.028;
+        p.dashTrail.push({
+          x: p.x, y: p.y, facing: p.facing, gdir: g,
+          dashK: 1 - p.dashT / K.DASH_TIME, t: 0, dur: 0.22,
+        });
+        this.emitDashLines(p, 2);
+        this.particles.push({
+          x: p.x + PLAYER_W / 2 - p.dashDir * 10,
+          y: p.y + 12 + Math.random() * (PLAYER_H - 16),
+          vx: -p.dashDir * (60 + Math.random() * 90), vy: (Math.random() - 0.5) * 35,
+          life: 0.22 + Math.random() * 0.18, color: Math.random() < 0.3 ? C.gold : C.chalk,
+        });
+      }
+      // Allow jumping out of a grounded dash cleanly
+      if (p.jbuf > 0 && p.coyote > 0) {
+        p.dashT = 0;
+        p.vy = -K.JUMP_V * g; p.jbuf = 0; p.coyote = 0;
+        p.squash = -0.12;
+        this.dust(p.x + PLAYER_W / 2, g > 0 ? p.y + PLAYER_H : p.y, 5);
+      } else {
+        p.vx = p.dashDir * K.DASH_SPEED;
+        p.vy = 0;
+        p.x = Math.max(16, Math.min(W - 16 - PLAYER_W, p.x + p.vx * dt));
+        // Keep grounded state accurate if dashing off a ledge
+        if (p.onGround) {
+          const overlaps = (x, w) => p.x + PLAYER_W > x + 3 && p.x < x + w - 3;
+          const onFloor = g > 0 ? Math.abs(p.y + PLAYER_H - FLOOR_Y) < 2 : Math.abs(p.y - CEIL_Y) < 2;
+          const onPlat = this.level.platforms.some(([x, y, w]) => overlaps(x, w)
+            && (g > 0 ? Math.abs(p.y + PLAYER_H - y) < 2 : Math.abs(p.y - (y + PLATFORM_H + 2)) < 2));
+          if (!onFloor && !onPlat) p.onGround = false;
+        }
+        return;
+      }
+    }
     const dir = (this.held('ArrowRight', 'KeyD') ? 1 : 0) - (this.held('ArrowLeft', 'KeyA') ? 1 : 0);
     p.vx = dir * K.SPEED;
     if (dir) {
@@ -533,6 +616,7 @@ class Game {
         if (sponge) {
           p.y = sponge.y - SPONGE_H - PLAYER_H;
           p.vy = -K.BOUNCE_V;
+          p.airDash = true;
           p.squash = -0.15;
           sponge.squash = 1;
           this.dust(sponge.x, sponge.y - SPONGE_H, 10, '#f3d36b');
@@ -556,6 +640,7 @@ class Game {
     }
     if (p.onGround) {
       p.coyote = K.COYOTE_TIME;
+      p.airDash = true;
       if (!wasGround) {
         p.squash = Math.min(0.16, 0.05 + impact / 4500);
         const fx = p.x + PLAYER_W / 2, fy = g > 0 ? p.y + PLAYER_H : p.y;
@@ -663,6 +748,7 @@ class Game {
     for (const e of this.effects) {
       const k = e.t / e.dur;
       if (e.kind === 'puff') drawDustPuff(g, e.x, e.y, k, e.size);
+      else if (e.kind === 'dashline') drawDashLine(g, e.x, e.y, e.len, e.dir, k, e.color);
       else drawSparkle(g, e.x, e.y, 2 + 4 * Math.sin(k * Math.PI), 1 - k);
     }
   }
@@ -697,9 +783,11 @@ class Game {
 
     const p = this.player;
     const fade = exiting ? Math.max(0, Math.min(1, 1 - (this.exitT - 1.15) / 0.5)) : 1;
+    if (!exiting) for (const tr of p.dashTrail) drawDashAfterimage(g, this.character, tr);
     drawCharacter(g, this.character, p.x, p.y, {
       facing: p.facing, walkT: p.walkT, walking: p.vx !== 0 || (exiting && this.exitT > 0.9),
       airborne: !p.onGround && !p.climbing && !exiting, gdir: p.gdir, climbing: !!p.climbing,
+      dashing: p.dashT > 0 && !exiting, dashK: p.dashT > 0 ? 1 - p.dashT / K.DASH_TIME : 0,
       alpha: fade, vy: p.vy, squash: p.squash, t: this.t,
     });
     if (this.hasKey && !exiting) {

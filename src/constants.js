@@ -20,6 +20,9 @@ export const PICKUP_ON_TOUCH = false; // true = collect by touching (AGENTS.md),
 
 export const BOUNCE_V = 900;        // yellow sponge launch speed (apex ≈ 245 px)
 export const CLIMB_SPEED = 150;     // ladder climbing speed
+export const DASH_SPEED = 580;      // horizontal burst speed during a dash (px/s)
+export const DASH_TIME = 0.16;      // duration of a dash burst (seconds)
+export const DASH_COOLDOWN = 0.65;  // cooldown between dashes (seconds)
 export const CHALK_BONUS_S = 5;     // seconds gained from a chalk pickup
 export const HARD_LANDING_V = 640;  // landing faster than this puffs up a chalk-dust cloud
 export const EXIT_TIME = 1.8;       // length of the key + door-opening animation
