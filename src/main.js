@@ -13,6 +13,7 @@ import { button as drawButton, inRect, makeMapBackground, makeMapPatches, makeHa
 import {
   CHARACTERS, renderCharSelect, renderMap, renderHallway, renderRules, renderResults, renderTimeUp, hallwayItems,
 } from './screens.js';
+import { isDevMode, mountDevSandbox, renderDevOverlay } from './dev.js';
 
 const { W, H, FLOOR_Y, CEIL_Y, TOKEN_R, PLAYER_W, PLAYER_H, PLATFORM_H, COLORS: C } = K;
 const MISTAKE_LINES = ['The classroom is fading!', "That won't work...", 'Flaw in the proof!', 'Hmm, not that way.'];
@@ -38,6 +39,9 @@ class Game {
     this.doorFlash = 0;
     this.ui = [];          // clickable areas registered by the current frame
     this.mouse = null;
+    const devOn = isDevMode();
+    this.dev = { enabled: devOn, unlockAll: devOn, freezeTimer: false, hitboxes: false };
+    globalThis.QED_DEV_UNLOCK_ALL = devOn;
     this.progress = loadProgress();
     this.charIndex = Math.max(0, CHARACTERS.findIndex((c) => c.id === this.progress.character));
     this.schoolId = SCHOOLS[0].id;
@@ -123,7 +127,7 @@ class Game {
 
   goHallway(schoolId) {
     const target = SCHOOLS.find((s) => s.id === schoolId);
-    if (!isUnlocked(this.progress, target)) {
+    if (!this.dev?.unlockAll && !isUnlocked(this.progress, target)) {
       const miss = starsMissing(this.progress, target);
       this.toast = { text: `${target.name} needs ${target.unlock} ★ – complete ${miss} more room${miss === 1 ? '' : 's'} to open it.`, t0: this.t, lock: true };
       return;
@@ -324,6 +328,7 @@ class Game {
   bindInput() {
     const gameKeys = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'Backspace']);
     window.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT')) return;
       // both Enter keys (main + numpad) count as Enter
       const code = e.key === 'Enter' ? 'Enter' : e.code;
       if (gameKeys.has(code) || code === 'Enter') e.preventDefault();
@@ -530,8 +535,10 @@ class Game {
     if (this.state === 'exit') return this.updateExit(dt);
     if (this.state !== 'play') return;
 
-    this.timeLeft -= dt;
-    if (this.timeLeft <= 0) { this.timeUp(); return; }
+    if (!this.dev.freezeTimer) {
+      this.timeLeft -= dt;
+      if (this.timeLeft <= 0) { this.timeUp(); return; }
+    }
 
     this.updatePlayer(dt);
     this.updateTokens();
@@ -778,6 +785,7 @@ class Game {
       this.drawEffects(g);
     } else {
       this.renderLevel(g);
+      if (this.dev.enabled && this.dev.hitboxes) renderDevOverlay(this, g);
       if (this.state === 'over') renderTimeUp(this, g);
     }
     this.canvas.style.cursor = this.ui.some((u) => inRect(this.mouse, u.rect)) ? 'pointer' : 'default';
@@ -957,8 +965,9 @@ class Game {
 await loadAssets();
 const game = new Game(document.getElementById('game'));
 window.qed = game; // handy for debugging in the browser console
+if (game.dev.enabled) mountDevSandbox(game);
 // make sure keys go to the game (not the address bar) right away and after any click
 const canvas = document.getElementById('game');
 canvas.focus();
-window.addEventListener('pointerdown', () => canvas.focus());
+window.addEventListener('pointerdown', (e) => { if (!e.target?.closest?.('#qed-dev-bar')) canvas.focus(); });
 game.start();

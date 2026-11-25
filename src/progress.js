@@ -1,20 +1,28 @@
 // Persistent player progress (localStorage). Only real results are stored – nothing is pre-filled.
 import { SCHOOLS } from './schools.js';
 
-const KEY = 'qed.progress.v1';
+const storageKey = () => {
+  if (typeof globalThis !== 'undefined' && globalThis.QED_DEV === true) return 'qed.progress.dev.v1';
+  if (typeof location !== 'undefined') {
+    const q = new URLSearchParams(location.search);
+    if ((q.has('dev') && q.get('dev') !== '0' && q.get('dev') !== 'false')
+      || (q.has('sandbox') && q.get('sandbox') !== '0' && q.get('sandbox') !== 'false')) return 'qed.progress.dev.v1';
+  }
+  return 'qed.progress.v1';
+};
 
 const fresh = () => ({ character: null, levels: {} });
 
 export function loadProgress() {
   try {
-    const p = JSON.parse(localStorage.getItem(KEY));
+    const p = JSON.parse(localStorage.getItem(storageKey()));
     if (p && typeof p === 'object' && p.levels) return p;
   } catch { /* storage unavailable or corrupted */ }
   return fresh();
 }
 
 export function saveProgress(p) {
-  try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* ignore (private mode etc.) */ }
+  try { localStorage.setItem(storageKey(), JSON.stringify(p)); } catch { /* ignore (private mode etc.) */ }
 }
 
 const entry = (p, id) => (p.levels[id] ??= {
@@ -55,9 +63,9 @@ export function totalProgress(p) {
   return { done, total };
 }
 
-/** A school opens once the player has enough ★ (completed rooms across all schools). */
-export const isUnlocked = (p, school) => totalProgress(p).done >= (school.unlock ?? 0);
-export const starsMissing = (p, school) => Math.max(0, (school.unlock ?? 0) - totalProgress(p).done);
+/** A school opens once the player has enough ★ (completed rooms across all schools), or always in dev unlock mode. */
+export const isUnlocked = (p, school) => !!globalThis.QED_DEV_UNLOCK_ALL || totalProgress(p).done >= (school.unlock ?? 0);
+export const starsMissing = (p, school) => (globalThis.QED_DEV_UNLOCK_ALL ? 0 : Math.max(0, (school.unlock ?? 0) - totalProgress(p).done));
 export const unlockedSchools = (p) => SCHOOLS.filter((s) => isUnlocked(p, s)).map((s) => s.id);
 
 /** First not-yet-completed level of a school (or null when everything is done). */

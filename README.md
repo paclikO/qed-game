@@ -98,13 +98,17 @@ ES modules do not work from `file://`, so serve the folder with any static serve
 python -m http.server 8000
 ```
 
-and open <http://localhost:8000>. The level checker is then at <http://localhost:8000/tools/verify-levels.html>.
+and open <http://localhost:8000>.
+- **Developer Sandbox:** open <http://localhost:8000/dev.html> (or `/?dev=1`) to unlock all 6 schools and jump directly to any of the 48 levels without collecting stars, freeze the timer, inspect hitboxes/telemetry, grant erasers or the key, and test safely in isolated `localStorage` (`qed.progress.dev.v1`).
+- **Level checker:** open <http://localhost:8000/tools/verify-levels.html>.
 
 ### Project structure
 
 ```
 index.html, style.css        entry point
+dev.html                     developer sandbox entry point (all levels unlocked, debug toolbar)
 src/main.js                  game state machine, physics, input, HUD, main loop
+src/dev.js                   developer sandbox toolbar, hitbox overlay & level jumper
 src/screens.js               menus: character select, map, hallway, rules, results
 src/ui.js                    UI kit (parchment, ribbons, buttons) + illustrated menu backgrounds
 src/draw.js                  in-level drawing: chalkboard, furniture, symbols, characters, effects
