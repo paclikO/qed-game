@@ -86,7 +86,7 @@ const roomNumber = (levelId) => {
 // ================================================================ 2. world map
 export function schoolState(game, school) {
   if (isComingSoon(school)) return 'soon';
-  if (!isUnlocked(game.progress, school)) return 'locked';
+  if (!game.dev?.unlockAll && !isUnlocked(game.progress, school)) return 'locked';
   const { done, total } = schoolProgress(game.progress, school);
   return done === 0 ? 'new' : done >= total ? 'done' : 'progress';
 }
