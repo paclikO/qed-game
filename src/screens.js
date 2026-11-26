@@ -5,6 +5,7 @@ import { LEVELS } from './levels.js';
 import { SCHOOLS, levelIndexById, isComingSoon } from './schools.js';
 import { schoolProgress, totalProgress, levelStats, isCompleted, nextLevelId, isUnlocked, starsMissing } from './progress.js';
 import { S } from './mathEngine.js';
+import { drawMathExpression } from './mathRender.js';
 import { images } from './assets.js';
 import { drawCharacter, drawToken, drawKey, drawSparkle, chalkFont, mathFont } from './draw.js';
 import {
@@ -402,15 +403,12 @@ export function renderRules(game, g) {
   g.font = chalkFont(16, true); g.fillStyle = '#ffe7a6'; g.fillText(`This room: ${level.name.replace(/^\d+\.\s*/, '')}`, 226, 300);
   g.font = chalkFont(12.5); g.fillStyle = C.chalk;
   wrapText(g, level.rule, 310).slice(0, 4).forEach((l, k) => g.fillText(l, 228, 322 + k * 16));
-  // template preview
-  let tx = 228;
-  const ty = 400;
-  g.font = mathFont(15);
-  for (const p of level.template) {
-    if (p === S) { g.strokeStyle = C.chalk; g.lineWidth = 1.2; g.strokeRect(tx, ty - 16, 22, 22); tx += 28; }
-    else { g.fillStyle = C.chalk; g.fillText(p, tx, ty); tx += g.measureText(p).width + 6; }
-  }
-  g.fillStyle = '#ffe7a6'; g.fillText(`= ${level.targetText}`, tx, ty);
+  // template preview (typeset math matching the in-game tray)
+  drawMathExpression(g, level, {
+    x: 228, yAxis: 414, align: 'left',
+    suffix: `= ${level.targetText}`, suffixColor: '#ffe7a6',
+    maxWidth: 334, maxHeight: 54, baseScale: 0.9,
+  });
 
   // --- Mechanics (right column)
   g.font = chalkFont(17, true); g.fillStyle = '#ffe7a6'; g.fillText('Game mechanics', 590, 120);
@@ -462,10 +460,19 @@ export function renderResults(game, g) {
     g.restore();
   }
   // solved expression on a mini board
-  const B = { x: P.x + 40, y: 108, w: P.w - 80, h: 60 };
+  const B = { x: P.x + 40, y: 108, w: P.w - 80, h: 62 };
   g.fillStyle = '#5b3a1f'; g.fillRect(B.x - 4, B.y - 4, B.w + 8, B.h + 8);
   g.fillStyle = '#21322b'; g.fillRect(B.x, B.y, B.w, B.h);
-  centerText(g, `${r.expression} = ${level.targetText}`, B.x + B.w / 2, B.y + 39, mathFont(r.expression.length > 30 ? 18 : 24, true), C.chalk);
+  if (r.trayValues) {
+    drawMathExpression(g, level, {
+      x: B.x + B.w / 2, yAxis: B.y + B.h / 2, align: 'center',
+      values: r.trayValues, compactArith: true,
+      suffix: `= ${level.targetText}`, suffixColor: C.green,
+      maxWidth: B.w - 22, maxHeight: B.h - 10, baseScale: 1,
+    });
+  } else {
+    centerText(g, `${r.expression} = ${level.targetText}`, B.x + B.w / 2, B.y + 39, mathFont(r.expression.length > 30 ? 18 : 24, true), C.chalk);
+  }
   // stars pop in one by one
   const since = game.t - r.t0;
   for (let i = 0; i < 3; i++) {
