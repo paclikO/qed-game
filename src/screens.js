@@ -5,6 +5,7 @@ import { LEVELS } from './levels.js';
 import { SCHOOLS, levelIndexById, isComingSoon } from './schools.js';
 import { schoolProgress, totalProgress, levelStats, isCompleted, nextLevelId, isUnlocked, starsMissing } from './progress.js';
 import { S } from './mathEngine.js';
+import { drawMathExpression } from './mathRender.js';
 import { images } from './assets.js';
 import { drawCharacter, drawToken, drawKey, drawSparkle, chalkFont, mathFont } from './draw.js';
 import {
@@ -380,8 +381,12 @@ export function renderRules(game, g) {
   g.strokeStyle = C.chalk; g.lineWidth = 1.5; g.beginPath(); g.moveTo(370, 62); g.quadraticCurveTo(470, 66, 570, 61); g.stroke();
   centerText(g, `Room ${room} · ${level.name.replace(/^\d+\.\s*/, '')}`, 470, 84, chalkFont(17), '#d9e6dd');
   // target box
-  g.strokeStyle = C.chalk; g.lineWidth = 1.6; g.strokeRect(760, 28, 160, 44);
-  centerText(g, `TARGET: ${level.targetText}`, 840, 57, chalkFont(21, true), C.chalk);
+  g.save();
+  g.fillStyle = 'rgba(18,28,24,0.45)';
+  g.strokeStyle = '#ffe7a6'; g.lineWidth = 1.6;
+  g.beginPath(); g.roundRect(752, 26, 174, 46, 6); g.fill(); g.stroke();
+  centerText(g, `TARGET: ${level.targetText}`, 839, 57, chalkFont(level.targetText.length > 3 ? 19 : 21, true), '#ffe7a6');
+  g.restore();
 
   // --- Objective (left column)
   g.font = chalkFont(17, true); g.fillStyle = '#ffe7a6'; g.fillText('Objective', 226, 120);
@@ -393,7 +398,7 @@ export function renderRules(game, g) {
   obj.forEach(([icon, text], i) => {
     const y = 148 + i * 44;
     if (icon === 'token') drawToken(g, '3', 244, y - 2, 1, {});
-    else if (icon === 'order') { g.font = mathFont(15, true); g.fillStyle = C.chalk; g.fillText('×÷', 230, y - 6); g.fillText('+−', 230, y + 10); }
+    else if (icon === 'order') { g.font = chalkFont(16, true); g.fillStyle = C.chalk; g.fillText('× ÷', 228, y - 6); g.fillText('+ −', 228, y + 11); }
     else imgIcon(g, 'prop.key', 244, y - 2, 30);
     g.font = chalkFont(12.5); g.fillStyle = C.chalk;
     wrapText(g, text, 270).slice(0, 2).forEach((l, k) => g.fillText(l, 272, y - 6 + k * 15));
@@ -402,15 +407,12 @@ export function renderRules(game, g) {
   g.font = chalkFont(16, true); g.fillStyle = '#ffe7a6'; g.fillText(`This room: ${level.name.replace(/^\d+\.\s*/, '')}`, 226, 300);
   g.font = chalkFont(12.5); g.fillStyle = C.chalk;
   wrapText(g, level.rule, 310).slice(0, 4).forEach((l, k) => g.fillText(l, 228, 322 + k * 16));
-  // template preview
-  let tx = 228;
-  const ty = 400;
-  g.font = mathFont(15);
-  for (const p of level.template) {
-    if (p === S) { g.strokeStyle = C.chalk; g.lineWidth = 1.2; g.strokeRect(tx, ty - 16, 22, 22); tx += 28; }
-    else { g.fillStyle = C.chalk; g.fillText(p, tx, ty); tx += g.measureText(p).width + 6; }
-  }
-  g.fillStyle = '#ffe7a6'; g.fillText(`= ${level.targetText}`, tx, ty);
+  // template preview (typeset math matching the in-game tray)
+  drawMathExpression(g, level, {
+    x: 228, yAxis: 414, align: 'left',
+    suffix: `= ${level.targetText}`, suffixColor: '#ffe7a6',
+    maxWidth: 334, maxHeight: 54, baseScale: 0.9,
+  });
 
   // --- Mechanics (right column)
   g.font = chalkFont(17, true); g.fillStyle = '#ffe7a6'; g.fillText('Game mechanics', 590, 120);
@@ -446,78 +448,184 @@ export function renderRules(game, g) {
 }
 
 // ================================================================ 5. results
+function drawChalkPlaque(g, x, y, w, h) {
+  g.save();
+  // Beveled dark oak wood frame
+  g.shadowColor = 'rgba(0,0,0,0.38)'; g.shadowBlur = 10; g.shadowOffsetY = 3;
+  const oak = g.createLinearGradient(x, y, x, y + h);
+  oak.addColorStop(0, '#6e472b'); oak.addColorStop(0.5, '#56351d'); oak.addColorStop(1, '#3d2412');
+  g.fillStyle = oak;
+  g.beginPath(); g.roundRect(x - 6, y - 6, w + 12, h + 12, 9); g.fill();
+  g.restore();
+
+  g.strokeStyle = '#24170e'; g.lineWidth = 1.6;
+  g.beginPath(); g.roundRect(x - 6, y - 6, w + 12, h + 12, 9); g.stroke();
+
+  // Slate-green chalkboard surface with soft radial vignette
+  const bg = g.createRadialGradient(x + w / 2, y + h / 2, 12, x + w / 2, y + h / 2, w * 0.65);
+  bg.addColorStop(0, '#2a3e37'); bg.addColorStop(1, '#182520');
+  g.fillStyle = bg;
+  g.beginPath(); g.roundRect(x, y, w, h, 5); g.fill();
+
+  // Delicate inner gold chalk border
+  g.strokeStyle = 'rgba(201,162,76,0.55)'; g.lineWidth = 1.1;
+  g.beginPath(); g.roundRect(x + 3, y + 3, w - 6, h - 6, 3); g.stroke();
+}
+
+function drawStatTile(g, x, y, w, h, label, value, sub = '', accent = INK) {
+  g.save();
+  g.fillStyle = 'rgba(92,62,28,0.1)';
+  g.strokeStyle = 'rgba(130,92,42,0.45)';
+  g.lineWidth = 1.2;
+  g.beginPath(); g.roundRect(x, y, w, h, 8); g.fill(); g.stroke();
+  // Subtle top highlight
+  g.strokeStyle = 'rgba(255,248,225,0.45)'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(x + 10, y + 1.5); g.lineTo(x + w - 10, y + 1.5); g.stroke();
+
+  centerText(g, label.toUpperCase(), x + w / 2, y + 20, serif(10.5, { bold: true }), '#7a562d');
+  centerText(g, value, x + w / 2, y + (sub ? 48 : 53), chalkFont(value.length > 8 ? 17 : 22, true), accent);
+  if (sub) centerText(g, sub, x + w / 2, y + 67, serif(11.5, { italic: true }), '#664827');
+  g.restore();
+}
+
 export function renderResults(game, g) {
   const r = game.results;
   const level = LEVELS[r.levelIndex];
+  const school = SCHOOLS.find((s) => s.id === game.schoolId);
   g.drawImage(game.background, 0, 0, W, H);
-  g.fillStyle = 'rgba(12,18,15,0.6)'; g.fillRect(0, 0, W, H);
-  const P = { x: 150, y: 22, w: 560, h: 492 };
-  parchment(g, P.x, P.y, P.w, P.h, 12);
-  centerText(g, 'Q.E.D. – Level Completed!', P.x + P.w / 2, 70, serif(30, { bold: true, italic: true }), INK);
-  centerText(g, `Room ${roomNumber(level.id)} · ${level.name.replace(/^\d+\.\s*/, '')}`, P.x + P.w / 2, 94, serif(15, { italic: true }), '#5a3d22');
-  if (r.unlocked?.length) {
-    const names = r.unlocked.map((id) => SCHOOLS.find((s) => s.id === id).name).join(', ');
-    g.save(); g.globalAlpha = 0.75 + 0.25 * Math.sin(game.t * 4);
-    centerText(g, `🔓 New school unlocked: ${names}!`, P.x + P.w / 2, 378, serif(16, { bold: true, italic: true }), '#2f5a33');
+  // Warm dark academia vignette over the completed classroom
+  const vig = g.createRadialGradient(W * 0.44, H * 0.5, 90, W * 0.5, H * 0.5, W * 0.65);
+  vig.addColorStop(0, 'rgba(12,18,15,0.58)'); vig.addColorStop(1, 'rgba(8,12,10,0.82)');
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+
+  // Main illuminated parchment certificate
+  const P = { x: 64, y: 26, w: 620, h: 488 };
+  parchment(g, P.x, P.y, P.w, P.h, 14);
+  // Decorative double inner border
+  g.strokeStyle = 'rgba(154,114,48,0.42)'; g.lineWidth = 1.2;
+  g.beginPath(); g.roundRect(P.x + 10, P.y + 10, P.w - 20, P.h - 20, 9); g.stroke();
+
+  // Header ribbon + room title
+  ribbon(g, P.x + P.w / 2, P.y + 32, 340, 40, 'Q.E.D.  ·  Proof Complete!', { font: serif(22, { bold: true, italic: true }) });
+  const roomTitle = `${school ? school.name + '  ·  ' : ''}Room ${roomNumber(level.id)}: ${level.name.replace(/^\d+\.\s*/, '')}`;
+  centerText(g, roomTitle, P.x + P.w / 2, P.y + 72, serif(13.5, { italic: true }), '#5a3d22');
+
+  // Framed chalkboard proof plaque with full typeset math
+  const B = { x: P.x + 36, y: P.y + 88, w: P.w - 72, h: 68 };
+  drawChalkPlaque(g, B.x, B.y, B.w, B.h);
+  if (r.trayValues) {
+    drawMathExpression(g, level, {
+      x: B.x + B.w / 2, yAxis: B.y + B.h / 2, align: 'center',
+      values: r.trayValues, compactArith: true,
+      suffix: `= ${level.targetText}`, suffixColor: C.green,
+      maxWidth: B.w - 28, maxHeight: B.h - 12, baseScale: 1.02,
+    });
+  } else {
+    centerText(g, `${r.expression} = ${level.targetText}`, B.x + B.w / 2, B.y + 42, chalkFont(20, true), C.chalk);
+  }
+
+  // Stars with warm golden halo behind earned stars
+  const since = game.t - r.t0;
+  const starY = P.y + 198;
+  for (let i = 0; i < 3; i++) {
+    const sx = P.x + P.w / 2 + (i - 1) * 74;
+    const k = Math.max(0, Math.min(1, (since - 0.2 - i * 0.28) / 0.25));
+    const filled = i < r.stars && k > 0;
+    if (filled) {
+      const glow = g.createRadialGradient(sx, starY, 4, sx, starY, 40);
+      glow.addColorStop(0, 'rgba(255,210,95,0.45)'); glow.addColorStop(1, 'rgba(255,210,95,0)');
+      g.fillStyle = glow; g.beginPath(); g.arc(sx, starY, 40, 0, Math.PI * 2); g.fill();
+    }
+    const rr = 26 * (filled ? 0.6 + 0.4 * k + 0.16 * Math.sin(Math.min(1, k) * Math.PI) : 0.92);
+    star(g, sx, starY, rr, filled);
+  }
+
+  // Optional banner badge (New Best or Newly Unlocked School) cleanly positioned with no overlap
+  const unlockText = r.unlocked?.length
+    ? `New school unlocked: ${r.unlocked.map((id) => SCHOOLS.find((s) => s.id === id).name).join(', ')}!`
+    : null;
+  const badgeText = unlockText ?? (r.newBest ? '★  New Best Score!  ★' : r.mistakes === 0 ? 'Flawless Proof!' : null);
+  if (badgeText) {
+    g.save();
+    g.font = serif(13.5, { bold: true, italic: true });
+    const bw2 = Math.min(P.w - 80, g.measureText(badgeText).width + 32);
+    const bx2 = P.x + (P.w - bw2) / 2, by2 = P.y + 232;
+    g.fillStyle = unlockText ? 'rgba(42,96,52,0.16)' : 'rgba(180,130,36,0.18)';
+    g.strokeStyle = unlockText ? '#2f6a39' : '#b48224';
+    g.lineWidth = 1.2;
+    g.beginPath(); g.roundRect(bx2, by2, bw2, 24, 12); g.fill(); g.stroke();
+    centerText(g, badgeText, P.x + P.w / 2, by2 + 16.5, serif(13.5, { bold: true, italic: true }), unlockText ? '#23522b' : '#7d500d');
     g.restore();
   }
-  // solved expression on a mini board
-  const B = { x: P.x + 40, y: 108, w: P.w - 80, h: 60 };
-  g.fillStyle = '#5b3a1f'; g.fillRect(B.x - 4, B.y - 4, B.w + 8, B.h + 8);
-  g.fillStyle = '#21322b'; g.fillRect(B.x, B.y, B.w, B.h);
-  centerText(g, `${r.expression} = ${level.targetText}`, B.x + B.w / 2, B.y + 39, mathFont(r.expression.length > 30 ? 18 : 24, true), C.chalk);
-  // stars pop in one by one
-  const since = game.t - r.t0;
-  for (let i = 0; i < 3; i++) {
-    const k = Math.max(0, Math.min(1, (since - 0.25 - i * 0.3) / 0.25));
-    const filled = i < r.stars && k > 0;
-    const rr = 24 * (filled ? 0.6 + 0.4 * k + 0.15 * Math.sin(Math.min(1, k) * Math.PI) : 1);
-    star(g, P.x + P.w / 2 + (i - 1) * 64, 208, rr, filled);
-  }
-  if (r.newBest) centerText(g, '★ New best score! ★', P.x + P.w / 2, 252, serif(15, { bold: true, italic: true }), '#8a5a12');
-  // statistics
-  const rows = [
-    ['Result', `${r.value}`],
-    ['Correct symbols', `${r.correct}`],
-    ['Mistakes', `${r.mistakes}`],
-    ['Time left', `${Math.floor(r.timeLeft)} s`],
-    ['Score', `${r.score}`],
-    ['Best score', `${r.bestScore}`],
-  ];
-  rows.forEach(([k, v], i) => {
-    const col = i % 2, row = Math.floor(i / 2);
-    const x = P.x + 60 + col * 240, y = 284 + row * 34;
-    g.font = serif(15, { italic: true }); g.fillStyle = '#5a3d22'; g.fillText(k, x, y);
-    g.font = serif(17, { bold: true }); g.fillStyle = INK; g.textAlign = 'right'; g.fillText(v, x + 200, y); g.textAlign = 'left';
-    g.strokeStyle = 'rgba(90,55,20,0.25)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y + 9); g.lineTo(x + 200, y + 9); g.stroke();
-  });
-  // buttons
+
+  // Three clean stat tiles
+  const tileY = P.y + 270, tileH = 80, tileGap = 14;
+  const tileW = (P.w - 72 - tileGap * 2) / 3;
+  const tx0 = P.x + 36;
+  drawStatTile(g, tx0, tileY, tileW, tileH, 'Time Left', `${Math.floor(r.timeLeft)} s`, `of ${level.time} s`, '#2b4d38');
+  drawStatTile(
+    g, tx0 + tileW + tileGap, tileY, tileW, tileH,
+    'Accuracy', r.mistakes === 0 ? 'Flawless' : `${r.mistakes} ${r.mistakes === 1 ? 'mistake' : 'mistakes'}`,
+    `${r.correct} symbols collected`, r.mistakes === 0 ? '#2b5d34' : '#8c2f2a',
+  );
+  drawStatTile(g, tx0 + 2 * (tileW + tileGap), tileY, tileW, tileH, 'Score', `${r.score}`, `Best: ${r.bestScore}`, '#5a3814');
+
+  // Action buttons with clear visual hierarchy
   const hasNext = r.nextIndex !== null;
-  const bw = 120, by = 404;
-  const bx = P.x + (P.w - (4 * bw + 3 * 10)) / 2;
-  game.button({ x: bx, y: by, w: bw, h: 42 }, 'Next Level', () => game.goRules(r.nextIndex), { disabled: !hasNext, glow: hasNext });
-  game.button({ x: bx + (bw + 10), y: by, w: bw, h: 42 }, 'Replay', () => game.startLevel(r.levelIndex));
-  game.button({ x: bx + 2 * (bw + 10), y: by, w: bw, h: 42 }, 'Back to School', () => game.goHallway(game.schoolId), { style: 'wood' });
-  game.button({ x: bx + 3 * (bw + 10), y: by, w: bw, h: 42 }, 'Back to Map', () => game.goMap(), { style: 'wood' });
-  centerText(g, hasNext ? 'Enter = next level · R = replay · Esc = school' : 'Last room of this school! · R = replay · Esc = school',
-    P.x + P.w / 2, 476, serif(12, { italic: true }), '#5a3d22');
-  // celebrating character with the key
-  const bob = Math.sin(game.t * 4) * 8;
-  drawCharacter(g, game.character, 830 - PLAYER_W / 2, 330 - PLAYER_H + bob, { scale: 1.9, airborne: true, facing: -1, vy: -200 });
-  drawKey(g, 790, 220 + bob, 34, -0.4 + Math.sin(game.t * 2) * 0.1);
-  if (Math.random() < 0.3) game.effects.push({ kind: 'spark', x: 760 + Math.random() * 140, y: 160 + Math.random() * 200, vx: 0, vy: -20, t: 0, dur: 0.9 });
+  const by = P.y + 378, bh = 44;
+  const widths = [164, 108, 126, 122];
+  const gap = 10;
+  const totalBtnW = widths.reduce((a, b) => a + b, 0) + gap * (widths.length - 1);
+  let bx = P.x + (P.w - totalBtnW) / 2;
+  game.button({ x: bx, y: by, w: widths[0], h: bh }, 'Next Level', () => game.goRules(r.nextIndex), { disabled: !hasNext, glow: hasNext, icon: '▶' });
+  bx += widths[0] + gap;
+  game.button({ x: bx, y: by, w: widths[1], h: bh }, 'Replay', () => game.startLevel(r.levelIndex));
+  bx += widths[1] + gap;
+  game.button({ x: bx, y: by, w: widths[2], h: bh }, 'Hallway', () => game.goHallway(game.schoolId), { style: 'wood' });
+  bx += widths[2] + gap;
+  game.button({ x: bx, y: by, w: widths[3], h: bh }, 'Campus Map', () => game.goMap(), { style: 'wood' });
+
+  centerText(g, hasNext ? 'Enter = next level · R = replay · Esc = hallway' : 'Last room of this school! · R = replay · Esc = hallway',
+    P.x + P.w / 2, P.y + 452, serif(12, { italic: true }), '#664827');
+
+  // Right-side celebratory professor stage with warm spotlight
+  const stageX = 824, stageY = 368;
+  const spot = g.createRadialGradient(stageX, stageY - 75, 16, stageX, stageY - 60, 145);
+  spot.addColorStop(0, 'rgba(255,214,120,0.28)'); spot.addColorStop(1, 'rgba(255,214,120,0)');
+  g.fillStyle = spot; g.beginPath(); g.arc(stageX, stageY - 60, 145, 0, Math.PI * 2); g.fill();
+  // Soft stage shadow beneath the leaping professor
+  const bob = Math.sin(game.t * 4) * 7;
+  g.fillStyle = 'rgba(0,0,0,0.35)';
+  g.beginPath(); g.ellipse(stageX, stageY + 12, 46 - bob * 0.8, 9, 0, 0, Math.PI * 2); g.fill();
+  drawCharacter(g, game.character, stageX - PLAYER_W / 2, stageY - PLAYER_H - 12 + bob, { scale: 1.85, airborne: true, facing: -1, vy: -200 });
+  drawKey(g, stageX - 58, stageY - 128 + bob, 34, -0.35 + Math.sin(game.t * 2.2) * 0.12);
+  if (Math.random() < 0.3) game.effects.push({ kind: 'spark', x: stageX - 70 + Math.random() * 140, y: 150 + Math.random() * 210, vx: 0, vy: -20, t: 0, dur: 0.9 });
 }
 
 // ================================================================ time up (overlay on the level)
 export function renderTimeUp(game, g) {
-  g.fillStyle = 'rgba(12,18,15,0.7)'; g.fillRect(0, 0, W, H);
-  parchment(g, W / 2 - 230, 140, 460, 250, 12);
-  centerText(g, "Time's up!", W / 2, 196, serif(36, { bold: true, italic: true }), '#8c2f2a');
-  centerText(g, 'The bell rang before the proof was finished.', W / 2, 228, serif(15, { italic: true }), '#5a3d22');
-  centerText(g, game.expressionText(), W / 2, 266, mathFont(20, true), INK);
-  game.button({ x: W / 2 - 200, y: 306, w: 190, h: 46 }, 'Try Again', () => game.startLevel(game.levelIndex), { glow: true });
-  game.button({ x: W / 2 + 10, y: 306, w: 190, h: 46 }, 'Back to School', () => game.goHallway(game.schoolId), { style: 'wood' });
-  centerText(g, 'Enter = try again · Esc = school', W / 2, 374, serif(12, { italic: true }), '#5a3d22');
+  g.fillStyle = 'rgba(10,16,14,0.74)'; g.fillRect(0, 0, W, H);
+  const P = { x: W / 2 - 260, y: 112, w: 520, h: 310 };
+  parchment(g, P.x, P.y, P.w, P.h, 14);
+  g.strokeStyle = 'rgba(154,114,48,0.42)'; g.lineWidth = 1.2;
+  g.beginPath(); g.roundRect(P.x + 10, P.y + 10, P.w - 20, P.h - 20, 9); g.stroke();
+
+  centerText(g, "Time's Up!", W / 2, P.y + 58, serif(34, { bold: true, italic: true }), '#8c2f2a');
+  centerText(g, 'The bell rang before the proof was finished.', W / 2, P.y + 86, serif(14.5, { italic: true }), '#5a3d22');
+
+  // Show current progress on a mini chalkboard plaque
+  const B = { x: P.x + 36, y: P.y + 106, w: P.w - 72, h: 64 };
+  drawChalkPlaque(g, B.x, B.y, B.w, B.h);
+  drawMathExpression(g, game.level, {
+    x: B.x + B.w / 2, yAxis: B.y + B.h / 2, align: 'center',
+    values: game.tray.map((t) => t.text),
+    suffix: `= ${game.level.targetText}?`, suffixColor: '#ffe7a6',
+    maxWidth: B.w - 24, maxHeight: B.h - 10, baseScale: 0.96,
+  });
+
+  game.button({ x: W / 2 - 204, y: P.y + 200, w: 192, h: 46 }, 'Try Again', () => game.startLevel(game.levelIndex), { glow: true, icon: '↻' });
+  game.button({ x: W / 2 + 12, y: P.y + 200, w: 192, h: 46 }, 'Back to School', () => game.goHallway(game.schoolId), { style: 'wood' });
+  centerText(g, 'Enter = try again · Esc = hallway', W / 2, P.y + 278, serif(12, { italic: true }), '#664827');
 }
 
 export { inRect };

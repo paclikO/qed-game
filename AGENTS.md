@@ -20,6 +20,7 @@ Vanilla HTML5 Canvas, CSS3, and ES6 Modules (`<script type="module">`) with **ze
 │   ├── dev.js                  # Dev Sandbox toolbar, level jumper, hitbox/telemetry overlay
 │   ├── constants.js            # Dimensions, physics, rules, palette, fonts
 │   ├── mathEngine.js           # Exact Frac arithmetic, evalArith + EV formulas, isComplete/canComplete
+│   ├── mathRender.js           # Structured Canvas 2D math typesetter (tray, rules, results)
 │   ├── levels.js               # All 48 level definitions
 │   ├── schools.js              # 6 schools, level ID lists, unlock thresholds, map regions
 │   ├── progress.js             # localStorage persistence, star/unlock helpers

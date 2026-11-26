@@ -309,24 +309,82 @@ export function drawEraserIcon(g, x, y, dim) {
   g.restore();
 }
 
+/** Deterministic hand-sketched chalk circle (inspired by docs/concepts/generic_level.jpg). */
+function strokeChalkCircle(g, x, y, r, seed, strokeCol, lw = 2.2) {
+  const rand = rng(seed);
+  const drawPass = (radius, width, alpha, segs = 28) => {
+    g.save();
+    g.globalAlpha *= alpha;
+    g.strokeStyle = strokeCol;
+    g.lineWidth = width;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    const startA = rand() * Math.PI * 2;
+    const sweep = Math.PI * 2 + 0.35 + rand() * 0.35; // slight overlap like hand-drawn chalk
+    g.beginPath();
+    for (let i = 0; i <= segs; i++) {
+      const a = startA + (i / segs) * sweep;
+      const wobble = Math.sin(a * 3 + seed) * 0.75 + Math.cos(a * 5 - seed * 0.7) * 0.45 + (rand() - 0.5) * 0.4;
+      const rr = radius + wobble;
+      const px = x + Math.cos(a) * rr;
+      const py = y + Math.sin(a) * rr;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.stroke();
+    g.restore();
+  };
+  drawPass(r, lw, 0.95);
+  drawPass(r + 1.1, lw * 0.55, 0.45);
+  // Subtle outer chalk-dust ring
+  g.save();
+  g.globalAlpha *= 0.25;
+  g.strokeStyle = strokeCol;
+  g.lineWidth = lw + 2.4;
+  g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+  g.restore();
+}
+
 export function drawToken(g, text, x, y, alpha, { highlight = false, negative = false, ghost = false } = {}) {
   g.save();
   g.globalAlpha = ghost ? 0.35 : alpha;
   const glowCol = negative ? C.violet : C.gold;
-  const grad = g.createRadialGradient(x, y, TOKEN_R - 2, x, y, TOKEN_R + 13);
-  grad.addColorStop(0, glowCol + '66'); grad.addColorStop(1, glowCol + '00');
-  g.fillStyle = grad; g.beginPath(); g.arc(x, y, TOKEN_R + 13, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#16201c'; g.beginPath(); g.arc(x, y, TOKEN_R, 0, Math.PI * 2); g.fill();
-  g.strokeStyle = negative ? C.violet : C.chalk; g.lineWidth = 2.5; g.stroke();
-  g.fillStyle = C.chalk; g.font = mathFont(text.length > 1 ? 17 : 22, true);
+  const ringCol = negative ? '#d7b8ff' : C.chalk;
+  const seed = Math.abs(Math.round(x * 13) + text.charCodeAt(0) * 97);
+
+  // Warm soft chalk aura behind the hand-drawn circle
+  const grad = g.createRadialGradient(x, y, TOKEN_R * 0.35, x, y, TOKEN_R + 17);
+  grad.addColorStop(0, glowCol + '55');
+  grad.addColorStop(0.55, glowCol + '28');
+  grad.addColorStop(1, glowCol + '00');
+  g.fillStyle = grad;
+  g.beginPath(); g.arc(x, y, TOKEN_R + 17, 0, Math.PI * 2); g.fill();
+
+  // Translucent dark slate interior so the chalkboard texture shows softly through
+  g.fillStyle = negative ? 'rgba(30,22,42,0.72)' : 'rgba(20,31,27,0.68)';
+  g.beginPath(); g.arc(x, y, TOKEN_R - 0.5, 0, Math.PI * 2); g.fill();
+
+  // Hand-sketched double-stroke chalk circle
+  strokeChalkCircle(g, x, y, TOKEN_R, seed, ringCol, 2.1);
+
+  // Hand-lettered chalk symbol inside
+  g.fillStyle = negative ? '#f0e4ff' : C.chalk;
+  g.shadowColor = glowCol + '66';
+  g.shadowBlur = 4;
+  const isOp = text === '+' || text === '−' || text === '×' || text === '÷';
+  const sz = text.length > 1 ? 16 : isOp ? 24 : 21;
+  g.font = chalkFont(sz, true);
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(text, x, y + 1);
+  g.fillText(text, x, y + (isOp ? 0.5 : 1));
+  g.shadowBlur = 0;
+
   if (highlight) {
     g.globalAlpha = 1;
-    g.strokeStyle = C.gold; g.lineWidth = 2;
-    g.beginPath(); g.arc(x, y, TOKEN_R + 4, 0, Math.PI * 2); g.stroke();
-    g.font = chalkFont(14); g.fillStyle = C.gold;
-    g.fillText('F – pick up', x, y - TOKEN_R - 14);
+    strokeChalkCircle(g, x, y, TOKEN_R + 5, seed + 7, C.gold, 1.6);
+    g.font = chalkFont(13, true);
+    g.fillStyle = C.gold;
+    g.shadowColor = 'rgba(0,0,0,0.7)'; g.shadowBlur = 4;
+    g.fillText('F – pick up', x, y - TOKEN_R - 15);
   }
   g.restore();
 }
@@ -571,8 +629,8 @@ export function drawDoor(g, d, label, labelColor, glow, t, open = false) {
     } else {
       g.drawImage(img, left, d.y + d.h - h, w, h);
     }
-    g.font = mathFont(19, true); g.fillStyle = labelColor; g.textAlign = 'center';
-    g.fillText(label, d.x + d.w / 2, d.y + d.h - h - 8);
+    g.font = chalkFont(20, true); g.fillStyle = labelColor; g.textAlign = 'center';
+    g.fillText(label, d.x + d.w / 2, d.y + d.h - h - 7);
     g.textAlign = 'left';
     return;
   }
@@ -584,7 +642,7 @@ export function drawDoor(g, d, label, labelColor, glow, t, open = false) {
   g.strokeStyle = '#3e2414'; g.lineWidth = 1.5;
   for (let i = 1; i < 3; i++) { g.beginPath(); g.moveTo(d.x + (i * d.w) / 3, d.y + 14); g.lineTo(d.x + (i * d.w) / 3, d.y + d.h); g.stroke(); }
   g.fillStyle = C.gold; g.beginPath(); g.arc(d.x + d.w - 10, d.y + d.h / 2 + 8, 3.5, 0, Math.PI * 2); g.fill();
-  g.font = mathFont(19, true); g.fillStyle = labelColor; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  g.font = chalkFont(20, true); g.fillStyle = labelColor; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
   g.fillText(label, d.x + d.w / 2, d.y - 18);
   g.textAlign = 'left';
 }

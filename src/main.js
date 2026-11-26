@@ -2,6 +2,7 @@
 import * as K from './constants.js';
 import { LEVELS } from './levels.js';
 import { S, canComplete, isComplete, isNegative } from './mathEngine.js';
+import { drawMathExpression, measureMathExpression } from './mathRender.js';
 import {
   makeBackground, drawPlatform, drawFloor, drawToken, drawCharacter, drawBookStack, drawDoor, chalkFont, mathFont, rng,
   drawLadder, drawSponge, drawPickup, drawDustPuff, drawKey, drawSparkle, drawEraserIcon, drawDashLine, drawDashAfterimage,
@@ -503,7 +504,8 @@ class Game {
     const pos = school ? school.levels.indexOf(lvl.id) : -1;
     const nextId = school && pos >= 0 ? school.levels[pos + 1] : undefined;
     this.results = {
-      levelId: lvl.id, levelIndex: this.levelIndex, expression, value: String(this.trayValue() ?? lvl.targetText),
+      levelId: lvl.id, levelIndex: this.levelIndex, expression, trayValues: this.tray.map((t) => t.text),
+      value: String(this.trayValue() ?? lvl.targetText),
       correct: this.correctPicks, mistakes: this.mistakes, timeLeft, score, stars: starsN, newBest,
       bestScore: levelStats(this.progress, lvl.id).bestScore,
       nextIndex: nextId ? LEVELS.findIndex((l) => l.id === nextId) : null, t0: this.t,
@@ -869,46 +871,69 @@ class Game {
   }
 
   renderTray(g, val) {
-    const parts = [];
-    let k = 0;
-    g.font = mathFont(18);
-    for (const p of this.level.template) {
-      if (p === S) parts.push({ slot: k++, w: 40 });
-      else parts.push({ text: p, w: g.measureText(p).width });
+    const values = this.tray.map((t) => t.text);
+    const suffix = val ? `= ${val}` : null;
+    const suffixColor = val && val.eq(this.level.target) ? C.green : C.red;
+    const top = FLOOR_Y + 4, h = 60, cy = top + h / 2;
+    const padX = 18;
+    const maxExprW = W - 44 - padX * 2;
+    const maxExprH = h - 10;
+    const measured = measureMathExpression(g, this.level, {
+      values, suffix, suffixColor, maxWidth: maxExprW, maxHeight: maxExprH,
+    });
+    const showLabel = measured.w + 74 <= maxExprW;
+    const labelW = showLabel ? 58 : 0;
+    const boxW = Math.min(W - 28, Math.max(220, labelW + measured.w + padX * 2));
+    const bx = (W - boxW) / 2;
+
+    // Dark-academia slate tray plaque with subtle oak/gold trim
+    g.save();
+    g.fillStyle = 'rgba(18,28,24,0.94)';
+    g.strokeStyle = this.dead ? C.red : this.hasKey ? C.green : '#c9a24c';
+    g.lineWidth = 1.8;
+    g.beginPath();
+    g.roundRect(bx, top, boxW, h, 8);
+    g.fill();
+    g.stroke();
+    g.strokeStyle = 'rgba(244,239,230,0.16)';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.roundRect(bx + 3, top + 3, boxW - 6, h - 6, 5);
+    g.stroke();
+
+    let contentX = bx + padX;
+    if (showLabel) {
+      g.font = chalkFont(13, true);
+      g.fillStyle = '#c9a24c';
+      g.textBaseline = 'middle';
+      g.textAlign = 'left';
+      g.fillText('TRAY', contentX, cy + 0.5);
+      // Subtle vertical chalk divider
+      g.strokeStyle = 'rgba(244,239,230,0.22)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(contentX + 44, top + 12);
+      g.lineTo(contentX + 44, top + h - 12);
+      g.stroke();
+      contentX += labelW;
     }
-    g.font = chalkFont(20, true);
-    const labelW = g.measureText('TRAY:').width;
-    const total = labelW + 12 + parts.reduce((s, p) => s + p.w, 0) + 6 * (parts.length - 1) + 95;
-    let x = (W - total) / 2;
-    const top = FLOOR_Y + 8, h = 56, cy = top + h / 2;
-    g.fillStyle = 'rgba(22,32,28,0.92)'; g.strokeStyle = C.chalk; g.lineWidth = 1.8;
-    g.beginPath(); g.roundRect(x - 12, top, total + 24, h, 6); g.fill(); g.stroke();
-    g.textBaseline = 'middle';
-    g.fillStyle = C.chalk; g.fillText('TRAY:', x, cy);
-    x += labelW + 12;
-    for (const p of parts) {
-      if (p.text !== undefined) {
-        g.font = mathFont(18); g.fillStyle = C.chalk; g.fillText(p.text, x, cy);
-      } else {
-        const filled = p.slot < this.tray.length;
-        const bad = this.dead && p.slot === this.tray.length - 1;
-        const col = bad ? C.red : filled ? C.chalk : C.chalkDim;
-        g.strokeStyle = col; g.lineWidth = 1.5;
-        g.beginPath(); g.roundRect(x, cy - 19, 40, 38, 5); g.stroke();
-        if (filled) {
-          const txt = this.tray[p.slot].text;
-          g.font = mathFont(txt.length > 1 ? 17 : 22, true); g.fillStyle = col; g.textAlign = 'center';
-          g.fillText(txt, x + 20, cy + 1); g.textAlign = 'left';
-        }
-      }
-      x += p.w + 6;
-    }
-    if (val) {
-      g.font = mathFont(22, true);
-      g.fillStyle = val.eq(this.level.target) ? C.green : C.red;
-      g.fillText(`= ${val}`, x + 4, cy);
-    }
-    g.textBaseline = 'alphabetic';
+
+    const innerCenter = contentX + (bx + boxW - padX - contentX) / 2;
+    drawMathExpression(g, this.level, {
+      x: innerCenter,
+      yAxis: cy,
+      align: 'center',
+      values,
+      badIndex: this.dead ? this.tray.length - 1 : -1,
+      activeIndex: this.dead ? -1 : this.tray.length,
+      highlightActive: this.state === 'play' && this.tray.length < this.slots,
+      suffix,
+      suffixColor,
+      maxWidth: bx + boxW - padX - contentX,
+      maxHeight: maxExprH,
+      t: this.t,
+    });
+    g.restore();
   }
 
   renderHud(g) {
