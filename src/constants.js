@@ -50,5 +50,5 @@ export const COLORS = {
   skin: '#efd2ae',
 };
 
-export const CHALK_FONT = '"Segoe Print", "Comic Sans MS", "Chalkboard SE", cursive';
-export const MATH_FONT = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
+export const CHALK_FONT = '"Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS", cursive';
+export const MATH_FONT = 'Georgia, "Times New Roman", serif';

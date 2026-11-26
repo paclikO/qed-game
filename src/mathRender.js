@@ -1,12 +1,12 @@
 // Structured mathematical typesetting renderer for HTML5 Canvas 2D.
 // Draws crisp stacked fractions (d/dx, a/b), tall calligraphic integrals & curved parentheses,
 // superscripts/subscripts, radicals, limits, and summations for the bottom Tray, Rules board, and Results board.
-import { COLORS as C, MATH_FONT } from './constants.js';
+import { COLORS as C, CHALK_FONT } from './constants.js';
 import { S } from './mathEngine.js';
 
 const SERIF = 'Georgia, "Times New Roman", serif';
 const mathSerif = (px, { italic = false, bold = false } = {}) => `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${px}px ${SERIF}`;
-const slotFont = (px) => `bold ${px}px ${MATH_FONT}`;
+const chalkNumFont = (px, bold = true) => `${bold ? 'bold ' : ''}${px}px ${CHALK_FONT}`;
 
 // ------------------------------------------------------------------ AST constructors
 const txt = (text, opts = {}) => ({ type: 'txt', text, ...opts });
@@ -190,7 +190,7 @@ function measure(g, node, st) {
       break;
     case 'txt': {
       const sz = node.size ?? 18;
-      g.font = mathSerif(sz, { italic: node.italic, bold: node.bold });
+      g.font = node.chalk ? chalkNumFont(sz, node.bold ?? true) : mathSerif(sz, { italic: node.italic, bold: node.bold });
       const w = g.measureText(node.text).width + (node.italic ? 1.5 : 0);
       m = { w, asc: sz * 0.48, desc: sz * 0.42 };
       break;
@@ -360,7 +360,7 @@ function drawNode(g, node, x, yAxis, st) {
       return;
     case 'txt': {
       const sz = node.size ?? 18;
-      g.font = mathSerif(sz, { italic: node.italic, bold: node.bold });
+      g.font = node.chalk ? chalkNumFont(sz, node.bold ?? true) : mathSerif(sz, { italic: node.italic, bold: node.bold });
       g.fillStyle = node.color ?? ink;
       g.textAlign = 'left';
       g.textBaseline = 'middle';
@@ -406,11 +406,11 @@ function drawNode(g, node, x, yAxis, st) {
       g.setLineDash([]);
 
       if (filled) {
-        g.font = slotFont(val.length > 1 ? d.smallFont : d.font);
+        g.font = chalkNumFont(val.length > 1 ? d.smallFont : d.font, true);
         g.fillStyle = isBad ? C.red : C.chalk;
         g.textAlign = 'center';
         g.textBaseline = 'middle';
-        g.fillText(val, sx + d.w / 2, yAxis + 0.5);
+        g.fillText(val, sx + d.w / 2, yAxis + 1);
       } else if (isNext && st.t !== undefined) {
         // Gentle pulsing dot inside the next slot to fill
         const pulse = 0.35 + 0.35 * Math.sin(st.t * 4.5);
@@ -539,7 +539,7 @@ export function measureMathExpression(g, level, opts = {}) {
   } = opts;
   let tree = levelMathTree(level, { compactArith, filledCount: values.length });
   if (suffix) {
-    tree = row([tree, sp(6), txt(suffix, { bold: true, size: 20, color: suffixColor })], 2);
+    tree = row([tree, sp(7), txt(suffix, { chalk: true, bold: true, size: 19, color: suffixColor })], 2);
   }
   const st = { values, badIndex: -1, activeIndex: -1, highlightActive: false, color, t: 0 };
   g.save();
@@ -566,7 +566,7 @@ export function drawMathExpression(g, level, {
 } = {}) {
   let tree = levelMathTree(level, { compactArith, filledCount: values.length });
   if (suffix) {
-    tree = row([tree, sp(6), txt(suffix, { bold: true, size: 20, color: suffixColor })], 2);
+    tree = row([tree, sp(7), txt(suffix, { chalk: true, bold: true, size: 19, color: suffixColor })], 2);
   }
   const st = { values, badIndex, activeIndex, highlightActive, color, t };
   g.save();
